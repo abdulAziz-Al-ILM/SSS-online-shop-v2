@@ -25,7 +25,8 @@ class AdminState(StatesGroup):
     srv_name, srv_desc = State(), State()
     loc_name, loc_address, loc_geo = State(), State(), State()
     soc_tg, soc_ig, soc_wa = State(), State(), State()
-
+    logo_photo = State()
+    
 class UserState(StatesGroup):
     input_qty, phone, location, check_photo = State(), State(), State(), State()
 
@@ -33,15 +34,16 @@ class UserState(StatesGroup):
 def is_admin(user_id):
     return user_id in ADMIN_IDS
 
+# Menyu tugmalarini yangilash
 def main_kb(user_id):
     rows = [[KeyboardButton(text="🛍 Дўкон"), KeyboardButton(text="🛒 Сават")],
             [KeyboardButton(text="ℹ️ Биз ҳақимизда")]]
     if is_admin(user_id):
-        rows.append([KeyboardButton(text="📦 Буюртмалар"), KeyboardButton(text="➕ Маҳсулот қўшиш")])
+        rows.append([KeyboardButton(text="📦 Буюртмалар"), KeyboardButton(text="➕ Маҳсулот")])
         rows.append([KeyboardButton(text="🛠 Хизмат"), KeyboardButton(text="📍 Локация")])
-        rows.append([KeyboardButton(text="🌐 Тармоқлар"), KeyboardButton(text="⚙️ Созламалар")])
+        rows.append([KeyboardButton(text="🖼 Логотип юклаш"), KeyboardButton(text="⚙️ Созламалар")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
-
+    
 # --- START ---
 @dp.message(Command("start"))
 async def start(m: types.Message, state: FSMContext):
@@ -50,6 +52,19 @@ async def start(m: types.Message, state: FSMContext):
 
 # ================= ADMIN: SAYT UCHUN YANGI BO'LIMLAR =================
 
+# Logo yuklash mantiqi
+@dp.message(F.text == "🖼 Логотип юклаш")
+async def logo_start(m: types.Message, state: FSMContext):
+    if not is_admin(m.from_user.id): return
+    await m.answer("📸 Фирма logotipini rasm shaklida yuboring:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.logo_photo)
+
+@dp.message(AdminState.logo_photo, F.photo)
+async def logo_get(m: types.Message, state: FSMContext):
+    await set_logo(m.photo[-1].file_id)
+    await m.answer("✅ Logotip yangilandi!", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
+    
 # 1. XIZMAT QO'SHISH
 @dp.message(F.text == "🛠 Хизмат")
 async def add_srv_start(m: types.Message, state: FSMContext):
