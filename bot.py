@@ -198,11 +198,15 @@ async def logo_save_step(m: types.Message, state: FSMContext):
     await m.answer("✅ Логотип янгиланди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
-@dp.message(F.text == "📹 Трейлер юклаш")
-async def trailer_cmd(m: types.Message, state: FSMContext):
-    if not is_admin(m.from_user.id): return
-    await m.answer("📹 Сайт учун видео-трейлер (MP4) юборинг:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(AdminState.trailer_video)
+# bot.py dagi o'sha handler o'rniga:
+@dp.message(AdminState.trailer_video, (F.video | F.document))
+async def trailer_get(m: types.Message, state: FSMContext):
+    # Fayl ID sini olish (video bo'lsa m.video, fayl bo'lsa m.document)
+    fid = m.video.file_id if m.video else m.document.file_id
+    
+    await set_trailer(fid)
+    await m.answer("✅ Видео-трейлер муваффақиятли юкланди!", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
 
 @dp.message(AdminState.trailer_video, F.video)
 async def trailer_save_step(m: types.Message, state: FSMContext):
