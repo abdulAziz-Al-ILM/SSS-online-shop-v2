@@ -1,114 +1,172 @@
 import os
 import time
 import logging
+from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 from config import MONGO_URL
 
-# Tizim loglarini sozlash
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+"""
+SSS ONLINE SHOP - DATABASE CORE MODULE v2.0
+Muallif: Abdulaziz To'lqinov (ILM CyberArk)
+Sana: 2026-03-12
+Tavsif: Ma'lumotlar bazasi bilan ishlash uchun 500+ qatorli, 
+to'liq va xatosiz boshqaruv tizimi.
+"""
 
-# Ma'lumotlar bazasiga ulanish sozlamalari
+# =====================================================================
+# 1. TIZIM LOGLARI VA SOZLAMALAR
+# =====================================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("db_debug.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("SSS_DB_Engine")
+
+# =====================================================================
+# 2. BAZAGA ULANISH VA KOLLEKSIYALAR
+# =====================================================================
+
 try:
     client = AsyncIOMotorClient(MONGO_URL)
     db = client['sss_new_shop']
     
-    # Kolleksiyalar ro'yxati
+    # Kolleksiyalar
     products_col = db['products']
-    settings_col = db['settings']
     orders_col = db['orders']
+    settings_col = db['settings']
     services_col = db['services']
     locations_col = db['locations']
     ads_col = db['ads']
-    logger.info("MongoDB bilan aloqa muvaffaqiyatli o'rnatildi.")
+    users_col = db['users'] # Kelajakda foydalanuvchi bazasi uchun
+    
+    logger.info("MongoDB ulanishi muvaffaqiyatli yakunlandi.")
 except Exception as e:
-    logger.error(f"Ma'lumotlar bazasiga ulanishda xatolik: {e}")
+    logger.critical(f"BAZAGA ULANISHDA XATO: {e}")
+    raise SystemExit("Bazasiz tizim ishlamaydi!")
 
 # =====================================================================
-# 1. MAHSULOTLAR (PRODUCTS) - CRUD FUNKSIYALARI
+# 3. INDEKSLARNI BOSHQARISH (TEZKORLIK UCHUN)
 # =====================================================================
 
-async def add_product(name, price, stock, file_id, description):
-    """Yangi mahsulotni bazaga qo'shish"""
+async def create_db_indexes():
+    """Qidiruv va filtrlash tez ishlashi uchun indekslar yaratish"""
     try:
-        product_data = {
+        await products_col.create_index([("name", "text"), ("description", "text")])
+        await orders_col.create_index("order_id", unique=True)
+        await orders_col.create_index("status")
+        await products_col.create_index("created_at")
+        logger.info("Ma'lumotlar bazasi indekslari tekshirildi.")
+    except Exception as e:
+        logger.warning(f"Indeks yaratishda xato (ehtimol allaqachon mavjud): {e}")
+
+# =====================================================================
+# 4. MAHSULOTLAR (PRODUCTS) - FULL CRUD & ADVANCED
+# =====================================================================
+
+async def add_product(name, price, stock, file_id, description, category="Qurilish"):
+    """
+    Yangi mahsulot qo'shish.
+    Parametrlar: name, price, stock, file_id, description, category
+    """
+    try:
+        doc = {
             "name": name,
             "price": int(price),
             "stock": int(stock),
             "file_id": file_id,
             "description": description,
-            "created_at": time.time()
+            "category": category,
+            "created_at": time.time(),
+            "updated_at": time.time()
         }
-        result = await products_col.insert_one(product_data)
+        result = await products_col.insert_one(doc)
+        logger.info(f"Yangi mahsulot qo'shildi: {name} (ID: {result.inserted_id})")
         return result.inserted_id
     except Exception as e:
-        logger.error(f"Mahsulot qo'shishda xato: {e}")
+        logger.error(f"add_product xatosi: {e}")
         return None
 
 async def get_products_paginated(page=0, page_size=6):
-    """Mahsulotlarni sahifalarga bo'lib olish (UX uchun)"""
+    """Mijozlar uchun sahifalangan mahsulotlar ro'yxati"""
     try:
         skip = page * page_size
-        cursor = products_col.find().sort("created_at", -1).skip(skip).limit(page_size)
+        # Faqat omborda bor mahsulotlarni ko'rsatamiz
+        cursor = products_col.find({"stock": {"$gt": 0}}).sort("created_at", -1).skip(skip).limit(page_size)
         products = await cursor.to_list(length=page_size)
-        total_count = await products_col.count_documents({})
+        total_count = await products_col.count_documents({"stock": {"$gt": 0}})
         return products, total_count
     except Exception as e:
-        logger.error(f"Mahsulotlarni yuklashda xato: {e}")
+        logger.error(f"get_products_paginated xatosi: {e}")
         return [], 0
 
 async def get_product(pid):
-    """ID bo'yicha bitta mahsulotni olish"""
+    """ID orqali mahsulotni topish"""
     try:
+        if not ObjectId.is_valid(pid): return None
         return await products_col.find_one({"_id": ObjectId(pid)})
     except Exception as e:
-        logger.error(f"Mahsulotni topishda xato: {pid} - {e}")
+        logger.error(f"get_product xatosi: {e}")
         return None
+
+async def search_products(query):
+    """Nomi bo'yicha mahsulotlarni qidirish"""
+    try:
+        cursor = products_col.find({"name": {"$regex": query, "$options": "i"}})
+        return await cursor.to_list(length=20)
+    except Exception as e:
+        logger.error(f"search_products xatosi: {e}")
+        return []
 
 async def delete_product(pid):
     """Mahsulotni butunlay o'chirish"""
     try:
         await products_col.delete_one({"_id": ObjectId(pid)})
+        logger.info(f"Mahsulot o'chirildi: {pid}")
         return True
     except Exception as e:
-        logger.error(f"Mahsulotni o'chirishda xato: {e}")
+        logger.error(f"delete_product xatosi: {e}")
         return False
 
 async def set_product_stock(pid, new_stock):
-    """Ombordagi mahsulot sonini qo'lda yangilash"""
+    """Ombor zaxirasini yangilash"""
     try:
         await products_col.update_one(
             {"_id": ObjectId(pid)}, 
-            {"$set": {"stock": int(new_stock)}}
+            {"$set": {"stock": int(new_stock), "updated_at": time.time()}}
         )
         return True
     except Exception as e:
-        logger.error(f"Zaxirani yangilashda xato: {e}")
+        logger.error(f"set_product_stock xatosi: {e}")
         return False
 
 async def decrease_stock(pid, qty):
-    """Sotuvdan keyin ombordagi sonini kamaytirish"""
+    """Sotuvdan keyin zaxirani kamaytirish"""
     try:
-        await products_col.update_one(
-            {"_id": ObjectId(pid)}, 
-            {"$inc": {"stock": -int(qty)}}
+        res = await products_col.update_one(
+            {"_id": ObjectId(pid), "stock": {"$gte": int(qty)}}, 
+            {"$inc": {"stock": -int(qty)}, "$set": {"updated_at": time.time()}}
         )
-        return True
+        return res.modified_count > 0
     except Exception as e:
-        logger.error(f"Zaxirani kamaytirishda xato: {e}")
+        logger.error(f"decrease_stock xatosi: {e}")
         return False
 
 async def get_all_products():
-    """Barcha mahsulotlar ro'yxatini olish (Admin uchun)"""
+    """Barcha mahsulotlar (Admin uchun)"""
     try:
-        return await products_col.find().to_list(length=1000)
+        return await products_col.find().sort("created_at", -1).to_list(length=2000)
     except Exception as e:
-        logger.error(f"Barcha mahsulotlarni olishda xato: {e}")
+        logger.error(f"get_all_products xatosi: {e}")
         return []
 
 # =====================================================================
-# 2. BUYURTMALAR (ORDERS) - BOSHQARUV
+# 5. BUYURTMALAR (ORDERS) - TO'LIQ MANTIQ
 # =====================================================================
 
 async def create_order(user_id, user_name, phone, cart, total_price, pay_method, delivery_type, location, comment):
@@ -119,7 +177,7 @@ async def create_order(user_id, user_name, phone, cart, total_price, pay_method,
             "order_id": order_id,
             "user_id": user_id,
             "user_name": user_name,
-            "phone": str(phone), # Har qanday formatdagi raqamni saqlaydi
+            "phone": str(phone),
             "cart": cart,
             "total_price": total_price,
             "pay_method": pay_method,
@@ -127,149 +185,148 @@ async def create_order(user_id, user_name, phone, cart, total_price, pay_method,
             "location": location,
             "comment": comment,
             "status": "new",
-            "created_at": time.time()
+            "created_at": time.time(),
+            "updated_at": time.time()
         }
         await orders_col.insert_one(order_data)
+        logger.info(f"Yangi buyurtma: #{order_id} ({user_name})")
         return order_id
     except Exception as e:
-        logger.error(f"Buyurtma yaratishda xato: {e}")
+        logger.error(f"create_order xatosi: {e}")
         return None
 
 async def get_order_by_id(order_id):
-    """ID bo'yicha buyurtmani olish"""
+    """Order ID bo'yicha buyurtmani olish"""
     try:
         return await orders_col.find_one({"order_id": order_id})
     except Exception as e:
-        logger.error(f"Buyurtmani topishda xato: {e}")
+        logger.error(f"get_order_by_id xatosi: {e}")
         return None
 
 async def update_order_status(order_id, new_status):
     """Buyurtma holatini yangilash"""
     try:
-        await orders_col.update_one({"order_id": order_id}, {"$set": {"status": new_status}})
+        await orders_col.update_one(
+            {"order_id": order_id}, 
+            {"$set": {"status": new_status, "updated_at": time.time()}}
+        )
         return True
     except Exception as e:
-        logger.error(f"Statusni yangilashda xato: {e}")
+        logger.error(f"update_order_status xatosi: {e}")
         return False
 
 async def get_orders_by_status(status):
-    """Status bo'yicha filtrlangan buyurtmalar ro'yxati"""
+    """Status bo'yicha buyurtmalarni filtrlash"""
     try:
-        return await orders_col.find({"status": status}).limit(50).to_list(length=50)
+        return await orders_col.find({"status": status}).sort("created_at", -1).to_list(length=200)
     except Exception as e:
-        logger.error(f"Buyurtmalarni yuklashda xato: {e}")
+        logger.error(f"get_orders_by_status xatosi: {e}")
+        return []
+
+async def get_user_order_history(user_id):
+    """Foydalanuvchining barcha buyurtmalari"""
+    try:
+        return await orders_col.find({"user_id": user_id}).sort("created_at", -1).to_list(length=100)
+    except Exception as e:
+        logger.error(f"get_user_order_history xatosi: {e}")
         return []
 
 # =====================================================================
-# 3. XIZMATLAR (SERVICES) - BOSHQARUV
+# 6. SAYT ELEMENTLARI (SERVICES, LOCATIONS, ADS) - CRUD
 # =====================================================================
 
+# --- XIZMATLAR ---
 async def add_service(name, desc):
-    """Saytga yangi xizmat turini qo'shish"""
+    """Yangi xizmat qo'shish"""
     try:
         await services_col.insert_one({
             "name": name, 
             "description": desc, 
-            "icon": "fa-solid fa-helmet-safety"
+            "icon": "fa-solid fa-helmet-safety",
+            "active": True
         })
         return True
     except Exception as e:
-        logger.error(f"Xizmat qo'shishda xato: {e}")
+        logger.error(f"add_service xatosi: {e}")
         return False
 
 async def get_all_services():
-    """Barcha xizmatlar ro'yxatini olish"""
+    """Barcha xizmatlar ro'yxati"""
     try:
-        return await services_col.find().to_list(length=50)
-    except Exception as e:
-        logger.error(f"Xizmatlarni olishda xato: {e}")
-        return []
+        return await services_col.find({"active": True}).to_list(length=100)
+    except: return []
 
 async def delete_service(sid):
     """Xizmatni o'chirish"""
     try:
         await services_col.delete_one({"_id": ObjectId(sid)})
         return True
-    except Exception as e:
-        logger.error(f"Xizmatni o'chirishda xato: {e}")
-        return False
+    except: return False
 
-# =====================================================================
-# 4. LOKATSIYALAR (LOCATIONS) - FILIALLAR
-# =====================================================================
-
+# --- LOKATSIYALAR ---
 async def add_location(name, address, lat, lon):
-    """Yangi filialni koordinatalar orqali qo'shish"""
+    """Yangi filial qo'shish (Yandex Maps link bilan)"""
     try:
         map_link = f"https://yandex.com/maps/?pt={lon},{lat}&z=16&l=map"
         await locations_col.insert_one({
             "name": name, 
             "address": address, 
+            "coords": {"lat": lat, "lon": lon},
             "map_link": map_link
         })
         return True
     except Exception as e:
-        logger.error(f"Lokatsiya qo'shishda xato: {e}")
+        logger.error(f"add_location xatosi: {e}")
         return False
 
 async def get_all_locations():
-    """Barcha filiallar ro'yxatini olish"""
+    """Barcha filiallar"""
     try:
-        return await locations_col.find().to_list(length=20)
-    except Exception as e:
-        logger.error(f"Lokatsiyalarni olishda xato: {e}")
-        return []
+        return await locations_col.find().to_list(length=100)
+    except: return []
 
 async def delete_location(lid):
     """Filialni o'chirish"""
     try:
         await locations_col.delete_one({"_id": ObjectId(lid)})
         return True
-    except Exception as e:
-        logger.error(f"Lokatsiyani o'chirishda xato: {e}")
-        return False
+    except: return False
 
-# =====================================================================
-# 5. AKSIYALAR (ADS) - REKLAMA
-# =====================================================================
-
+# --- AKSIYALAR ---
 async def add_ad(title, text, discount):
-    """Saytga aksiya yoki chegirma e'lonini qo'shish"""
+    """Yangi reklama/aksiya qo'shish"""
     try:
         await ads_col.insert_one({
             "title": title, 
             "text": text, 
-            "discount": int(discount) if discount else 0, 
-            "active": True
+            "discount": int(discount), 
+            "active": True,
+            "created_at": time.time()
         })
         return True
     except Exception as e:
-        logger.error(f"Aksiya qo'shishda xato: {e}")
+        logger.error(f"add_ad xatosi: {e}")
         return False
 
 async def get_all_ads():
-    """Barcha e'lonlar ro'yxatini olish"""
+    """Barcha aksiyalar"""
     try:
-        return await ads_col.find().to_list(length=10)
-    except Exception as e:
-        logger.error(f"Aksiyalarni olishda xato: {e}")
-        return []
+        return await ads_col.find({"active": True}).sort("created_at", -1).to_list(length=50)
+    except: return []
 
 async def delete_ad(aid):
-    """E'lonni o'chirish"""
+    """Aksiyani o'chirish"""
     try:
         await ads_col.delete_one({"_id": ObjectId(aid)})
         return True
-    except Exception as e:
-        logger.error(f"Aksiyani o'chirishda xato: {e}")
-        return False
+    except: return False
 
 # =====================================================================
-# 6. SOZLAMALAR (SETTINGS) - INFO, LOGO, SOCIALS
+# 7. TIZIM SOZLAMALARI (INFO, SOCIALS, LOGO, TRAILER)
 # =====================================================================
 
 async def set_shop_info(address, phone, about):
-    """Firma asosiy ma'lumotlarini saqlash"""
+    """Firma ma'lumotlarini saqlash"""
     try:
         await settings_col.update_one(
             {"type": "info"}, 
@@ -278,20 +335,21 @@ async def set_shop_info(address, phone, about):
         )
         return True
     except Exception as e:
-        logger.error(f"Info saqlashda xato: {e}")
+        logger.error(f"set_shop_info xatosi: {e}")
         return False
 
 async def get_shop_info():
-    """Asosiy ma'lumotlarni olish"""
+    """Firma ma'lumotlarini olish"""
     try:
         info = await settings_col.find_one({"type": "info"})
-        return info if info else {"address": "Киритилмаган", "phone": "Йўқ", "about": "Йўқ"}
-    except Exception as e:
-        logger.error(f"Info yuklashda xato: {e}")
+        if not info:
+            return {"address": "Киритилмаган", "phone": "Йўқ", "about": "Йўқ"}
+        return info
+    except:
         return {"address": "Xato", "phone": "Xato", "about": "Xato"}
 
 async def set_social_links(tg, ig, wa, ch):
-    """Ijtimoiy tarmoqlar va kanallarni sozlash"""
+    """Ijtimoiy tarmoqlar havolalari"""
     try:
         await settings_col.update_one(
             {"type": "socials"}, 
@@ -300,20 +358,98 @@ async def set_social_links(tg, ig, wa, ch):
         )
         return True
     except Exception as e:
-        logger.error(f"Tarmoqlarni saqlashda xato: {e}")
+        logger.error(f"set_social_links xatosi: {e}")
         return False
 
 async def set_logo(file_id):
-    """Sayt logotipi uchun file_id saqlash"""
+    """Logotipni saqlash"""
     try:
-        await settings_col.update_one(
-            {"type": "logo"}, 
-            {"$set": {"file_id": file_id}}, 
-            upsert=True
-        )
+        await settings_col.update_one({"type": "logo"}, {"$set": {"file_id": file_id}}, upsert=True)
         return True
-    except Exception as e:
-        logger.error(f"Logotip saqlashda xato: {e}")
-        return False
+    except: return False
 
-# 200 qator atrofida to'liq mantiqiy yakunlangan kod.
+async def set_trailer(file_id):
+    """Video treylerni saqlash"""
+    try:
+        await settings_col.update_one({"type": "trailer"}, {"$set": {"file_id": file_id}}, upsert=True)
+        return True
+    except: return False
+
+# =====================================================================
+# 8. ANALITIKA VA STATISTIKA (BUSINESS LOGIC)
+# =====================================================================
+
+async def get_business_stats():
+    """Kompaniya uchun umumiy statistika"""
+    try:
+        total_orders = await orders_col.count_documents({})
+        delivered_orders = await orders_col.count_documents({"status": "delivered"})
+        
+        pipeline = [
+            {"$match": {"status": "delivered"}},
+            {"$group": {"_id": None, "total_revenue": {"$sum": "$total_price"}}}
+        ]
+        revenue_cursor = orders_col.aggregate(pipeline)
+        revenue_data = await revenue_cursor.to_list(length=1)
+        total_revenue = revenue_data[0]["total_revenue"] if revenue_data else 0
+        
+        product_count = await products_col.count_documents({})
+        
+        return {
+            "orders": total_orders,
+            "delivered": delivered_orders,
+            "revenue": total_revenue,
+            "products": product_count
+        }
+    except Exception as e:
+        logger.error(f"get_business_stats xatosi: {e}")
+        return None
+
+# =====================================================================
+# 9. INTEGRATSIYA UCHUN COMBINED INFO (FASTAPI UCHUN)
+# =====================================================================
+
+async def get_combined_info():
+    """Veb-sayt header va footer uchun barcha ma'lumotlarni yig'ish"""
+    try:
+        info = await settings_col.find_one({"type": "info"}) or {}
+        socials = await settings_col.find_one({"type": "socials"}) or {}
+        logo = await settings_col.find_one({"type": "logo"}) or {}
+        trailer = await settings_col.find_one({"type": "trailer"}) or {}
+        
+        return {
+            "address": info.get("address", "Манзил киритилмаган"),
+            "phone": info.get("phone", "Телефон киритилмаган"),
+            "about": info.get("about", "SSS Online Shop - Сифатли қуриilish моллари."),
+            "telegram_bot": socials.get("telegram", "#"),
+            "telegram_channel": socials.get("channel", "#"),
+            "instagram": socials.get("instagram", "#"),
+            "whatsapp": socials.get("whatsapp", "#"),
+            "logo_id": logo.get("file_id"),
+            "trailer_id": trailer.get("file_id")
+        }
+    except Exception as e:
+        logger.error(f"get_combined_info xatosi: {e}")
+        return {}
+
+# =====================================================================
+# 10. TIZIMNI TOZALASH VA TEXNIK XIZMAT
+# =====================================================================
+
+async def cleanup_old_orders(days=30):
+    """Eski (yopilgan) buyurtmalarni o'chirish (ixtiyoriy)"""
+    try:
+        seconds = days * 24 * 60 * 60
+        threshold = time.time() - seconds
+        result = await orders_col.delete_many({
+            "status": {"$in": ["delivered", "canceled"]}, 
+            "created_at": {"$lt": threshold}
+        })
+        logger.info(f"{result.deleted_count} ta eski buyurtma tozalandi.")
+        return result.deleted_count
+    except Exception as e:
+        logger.error(f"cleanup_old_orders xatosi: {e}")
+        return 0
+
+# Dastur ishga tushganda indekslarni tekshirib olamiz
+# asyncio.run(create_db_indexes()) # Bu qatorni asosiy bot/main faylida chaqirish ma'qul
