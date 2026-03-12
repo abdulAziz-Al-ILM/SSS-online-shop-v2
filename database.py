@@ -6,12 +6,9 @@ from bson import ObjectId
 from config import MONGO_URL
 
 # =====================================================================
-# TIZIM LOGLARI
+# LOGLARNI SOZLASH
 # =====================================================================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("SSS_Database_Engine")
 
 # =====================================================================
@@ -21,7 +18,7 @@ try:
     client = AsyncIOMotorClient(MONGO_URL)
     db = client['sss_new_shop']
     
-    # Kolleksiyalar ro'yxati
+    # Kolleksiyalar
     products_col = db['products']
     orders_col = db['orders']
     settings_col = db['settings']
@@ -29,16 +26,16 @@ try:
     locations_col = db['locations']
     ads_col = db['ads']
     
-    logger.info("MongoDB ulanishi muvaffaqiyatli!")
+    logger.info("MongoDB ulanishi 100% muvaffaqiyatli!")
 except Exception as e:
-    logger.critical(f"BAZAGA ULANISHDA XATO: {e}")
+    logger.critical(f"BAZA BILAN ALOQA YO'Q: {e}")
 
 # =====================================================================
 # 1. MAHSULOTLAR (PRODUCTS) MANTIQI
 # =====================================================================
 
 async def add_product(name, price, stock, file_id, description):
-    """Yangi mahsulotni barcha detallari bilan qo'shish"""
+    """Yangi mahsulotni bazaga barcha detallari bilan qo'shish"""
     try:
         doc = {
             "name": name,
@@ -49,7 +46,6 @@ async def add_product(name, price, stock, file_id, description):
             "created_at": time.time()
         }
         result = await products_col.insert_one(doc)
-        logger.info(f"Mahsulot qo'shildi: {name}")
         return result.inserted_id
     except Exception as e:
         logger.error(f"add_product xatosi: {e}")
@@ -68,7 +64,7 @@ async def get_products_paginated(page=0, page_size=6):
         return [], 0
 
 async def get_product(pid):
-    """Bitta mahsulot ma'lumotlarini olish"""
+    """ID orqali mahsulot ma'lumotlarini olish"""
     try:
         if not ObjectId.is_valid(pid): return None
         return await products_col.find_one({"_id": ObjectId(pid)})
@@ -86,7 +82,7 @@ async def delete_product(pid):
         return False
 
 async def set_product_stock(pid, new_stock):
-    """Omborni yangilash"""
+    """Omborni tahrirlash"""
     try:
         await products_col.update_one({"_id": ObjectId(pid)}, {"$set": {"stock": int(new_stock)}})
         return True
@@ -95,7 +91,7 @@ async def set_product_stock(pid, new_stock):
         return False
 
 async def decrease_stock(pid, qty):
-    """Sotuvdan keyin sonini kamaytirish"""
+    """Sotuvdan keyin ombordagi mahsulotni kamaytirish"""
     try:
         await products_col.update_one({"_id": ObjectId(pid)}, {"$inc": {"stock": -int(qty)}})
         return True
@@ -106,7 +102,7 @@ async def decrease_stock(pid, qty):
 async def get_all_products():
     """Admin uchun barcha mahsulotlar ro'yxati"""
     try:
-        return await products_col.find().sort("created_at", -1).to_list(length=1000)
+        return await products_col.find().sort("created_at", -1).to_list(length=2000)
     except Exception as e:
         logger.error(f"get_all_products xatosi: {e}")
         return []
@@ -242,7 +238,9 @@ async def set_shop_info(address, phone, about):
 async def get_shop_info():
     try:
         info = await settings_col.find_one({"type": "info"})
-        return info if info else {"address": "Киритилмаган", "phone": "Йўқ", "about": "Йўқ"}
+        if not info:
+            return {"address": "Киритилмаган", "phone": "Йўқ", "about": "Йўқ"}
+        return info
     except Exception as e:
         logger.error(f"get_shop_info xatosi: {e}")
         return {"address": "Xato", "phone": "Xato", "about": "Xato"}
@@ -268,8 +266,14 @@ async def set_logo(file_id):
         return False
 
 async def set_trailer(file_id):
+    """Sayt headeri uchun video file_id (trailer) saqlash"""
     try:
-        await settings_col.update_one({"type": "trailer"}, {"$set": {"file_id": file_id}}, upsert=True)
+        # BUNDA FILE_ID'NI TRAILER_ID KALITI OSTIDA SAQLAYMIZ (SAYT BILAN BIR XIL BO'LISHI UCHUN)
+        await settings_col.update_one(
+            {"type": "trailer"}, 
+            {"$set": {"trailer_id": file_id}}, # MUHIM: trailer_id deb yozdik
+            upsert=True
+        )
         return True
     except Exception as e:
         logger.error(f"set_trailer xatosi: {e}")
@@ -296,7 +300,7 @@ async def get_combined_info():
             "instagram": socials.get("instagram", "#"),
             "whatsapp": socials.get("whatsapp", "#"),
             "logo_id": logo.get("file_id"),
-            "trailer_id": trailer.get("file_id")
+            "trailer_id": trailer.get("trailer_id") # BU YERDA HAM TRAILER_ID
         }
     except Exception as e:
         logger.error(f"get_combined_info xatosi: {e}")
