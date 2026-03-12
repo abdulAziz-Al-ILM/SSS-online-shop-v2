@@ -409,25 +409,24 @@ async def get_business_stats():
 # 9. INTEGRATSIYA UCHUN COMBINED INFO (FASTAPI UCHUN)
 # =====================================================================
 
+# database_web.py ichidagi get_combined_info funksiyasi:
 async def get_combined_info():
-    """Veb-sayt header va footer uchun barcha ma'lumotlarni yig'ish"""
-    try:
-        info = await settings_col.find_one({"type": "info"}) or {}
-        socials = await settings_col.find_one({"type": "socials"}) or {}
-        logo = await settings_col.find_one({"type": "logo"}) or {}
-        trailer = await settings_col.find_one({"type": "trailer"}) or {}
-        
-        return {
-            "address": info.get("address", "Манзил киритилмаган"),
-            "phone": info.get("phone", "Телефон киритилмаган"),
-            "about": info.get("about", "SSS Online Shop - Сифатли қуриilish моллари."),
-            "telegram_bot": socials.get("telegram", "#"),
-            "telegram_channel": socials.get("channel", "#"),
-            "instagram": socials.get("instagram", "#"),
-            "whatsapp": socials.get("whatsapp", "#"),
-            "logo_id": logo.get("file_id"),
-            "trailer_id": trailer.get("file_id")
-        }
+    info = await settings_col.find_one({"type": "info"}) or {}
+    socials = await settings_col.find_one({"type": "socials"}) or {}
+    logo = await settings_col.find_one({"type": "logo"}) or {}
+    trailer = await settings_col.find_one({"type": "trailer"}) or {} # Mana shu qatorga e'tibor ber
+    
+    return {
+        "address": info.get("address", "Киритилмаган"),
+        "phone": info.get("phone", "+998"),
+        "about": info.get("about", "SSS Online Shop"),
+        "telegram_bot": socials.get("telegram", "#"),
+        "telegram_channel": socials.get("channel", "#"),
+        "instagram": socials.get("instagram", "#"),
+        "whatsapp": socials.get("whatsapp", "#"),
+        "logo_id": logo.get("file_id"),
+        "trailer_id": trailer.get("file_id") # Bu yerda file_id olinayotganini tekshir
+    }
     except Exception as e:
         logger.error(f"get_combined_info xatosi: {e}")
         return {}
