@@ -7,7 +7,12 @@ client = AsyncIOMotorClient(MONGO_URL)
 db = client['sss_new_shop']
 products_col = db['products']
 settings_col = db['settings']
-orders_col = db['orders'] # Yangi: Buyurtmalar to'plami
+orders_col = db['orders']
+
+# Sayt uchun kerakli yangi kolleksiyalar
+services_col = db['services']
+locations_col = db['locations']
+ads_col = db['ads']
 
 # --- MAHSULOTLAR (Paginatsiya bilan) ---
 async def add_product(name, price, stock, file_id, description):
@@ -17,7 +22,6 @@ async def add_product(name, price, stock, file_id, description):
     })
 
 async def get_products_paginated(page=0, page_size=6):
-    # page 0 dan boshlanadi
     skip = page * page_size
     cursor = products_col.find().skip(skip).limit(page_size)
     products = await cursor.to_list(length=page_size)
@@ -38,26 +42,16 @@ async def set_product_stock(pid, new_stock):
     await products_col.update_one({"_id": ObjectId(pid)}, {"$set": {"stock": new_stock}})
 
 async def get_all_products():
-    # Admin uchun hammasini olish (ro'yxat uchun)
     return await products_col.find().to_list(length=1000)
 
 # --- BUYURTMALAR (ORDER) ---
 async def create_order(user_id, user_name, phone, cart, total_price, pay_method, delivery_type, location, comment):
-    # Unikal 6 xonali ID yasash (Vaqt millisekundlaridan foydalanib)
     order_id = str(int(time.time() * 1000))[-6:] 
-    
     order_data = {
-        "order_id": order_id,
-        "user_id": user_id,
-        "user_name": user_name,
-        "phone": phone,
-        "cart": cart, # {pid: {name, price, qty}}
-        "total_price": total_price,
-        "pay_method": pay_method,
-        "delivery_type": delivery_type,
-        "location": location,
-        "comment": comment,
-        "status": "new", # new, processing, ready, delivered, canceled
+        "order_id": order_id, "user_id": user_id, "user_name": user_name,
+        "phone": phone, "cart": cart, "total_price": total_price,
+        "pay_method": pay_method, "delivery_type": delivery_type,
+        "location": location, "comment": comment, "status": "new",
         "created_at": time.time()
     }
     await orders_col.insert_one(order_data)
@@ -72,10 +66,26 @@ async def update_order_status(order_id, new_status):
 async def get_orders_by_status(status):
     return await orders_col.find({"status": status}).to_list(length=50)
 
-# --- SOZLAMALAR ---
+# --- SOZLAMALAR VA INFO ---
 async def set_shop_info(address):
     await settings_col.update_one({"type": "info"}, {"$set": {"address": address}}, upsert=True)
 
 async def get_shop_info():
     info = await settings_col.find_one({"type": "info"})
     return info if info else {"address": "Manzil kiritilmagan"}
+
+async def set_social_links(tg, ig, wa):
+    await settings_col.update_one(
+        {"type": "socials"}, 
+        {"$set": {"telegram": tg, "instagram": ig, "whatsapp": wa}}, 
+        upsert=True
+    )
+
+# --- SAYT UCHUN YANGI BO'LIMLAR ---
+async def add_service(name, desc):
+    await services_col.insert_one({"name": name, "description": desc, "icon": "fa-solid fa-tools"})
+
+async def add_location(name, address, lat, lon):
+    # Telegram koordinatalarini avtomatik Yandex xarita linkiga aylantiramiz
+    map_link = f"https://yandex.com/maps/?pt={lon},{lat}&z=16&l=map"
+    await locations_col.insert_one({"name": name, "address": address, "map_link": map_link})
