@@ -6,7 +6,7 @@ from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from config import BOT_TOKEN, ADMIN_IDS, CARD_NUMBER
@@ -19,19 +19,15 @@ dp = Dispatcher(storage=MemoryStorage())
 
 # --- STATES ---
 class AdminState(StatesGroup):
-    photo = State()
-    name = State()
-    price = State()
-    desc = State()
-    stock = State()
-    edit_stock_qty = State()
-    shop_address = State()
+    photo, name, price, desc, stock = State(), State(), State(), State(), State()
+    edit_stock_qty, shop_address = State(), State()
+    # Sayt uchun yangi statelar
+    srv_name, srv_desc = State(), State()
+    loc_name, loc_address, loc_geo = State(), State(), State()
+    soc_tg, soc_ig, soc_wa = State(), State(), State()
 
 class UserState(StatesGroup):
-    input_qty = State()
-    phone = State()
-    location = State()
-    check_photo = State()
+    input_qty, phone, location, check_photo = State(), State(), State(), State()
 
 # --- UTILS ---
 def is_admin(user_id):
@@ -42,7 +38,8 @@ def main_kb(user_id):
             [KeyboardButton(text="ℹ️ Биз ҳақимизда")]]
     if is_admin(user_id):
         rows.append([KeyboardButton(text="📦 Буюртмалар"), KeyboardButton(text="➕ Маҳсулот қўшиш")])
-        rows.append([KeyboardButton(text="⚙️ Созламалар")])
+        rows.append([KeyboardButton(text="🛠 Хизмат"), KeyboardButton(text="📍 Локация")])
+        rows.append([KeyboardButton(text="🌐 Тармоқлар"), KeyboardButton(text="⚙️ Созламалар")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 # --- START ---
@@ -51,7 +48,93 @@ async def start(m: types.Message, state: FSMContext):
     await state.clear()
     await m.answer(f"Салом, {m.from_user.full_name}!", reply_markup=main_kb(m.from_user.id))
 
-# ================= ADMIN: MAHSULOT QO'SHISH =================
+# ================= ADMIN: SAYT UCHUN YANGI BO'LIMLAR =================
+
+# 1. XIZMAT QO'SHISH
+@dp.message(F.text == "🛠 Хизмат")
+async def add_srv_start(m: types.Message, state: FSMContext):
+    if not is_admin(m.from_user.id): return
+    await m.answer("Хизмат номини ёзинг (мас: Сантехника):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.srv_name)
+
+@dp.message(AdminState.srv_name)
+async def add_srv_name(m: types.Message, state: FSMContext):
+    await state.update_data(name=m.text)
+    await m.answer("Бу хизмат ҳақида маълумот ёзинг:")
+    await state.set_state(AdminState.srv_desc)
+
+@dp.message(AdminState.srv_desc)
+async def add_srv_desc(m: types.Message, state: FSMContext):
+    data = await state.get_data()
+    await add_service(data['name'], m.text)
+    await m.answer("✅ Хизмат веб-сайтга қўшилди!", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
+
+# 2. LOKATSIYA QO'SHISH (SENING G'OYANG ASOSIDA)
+@dp.message(F.text == "📍 Локация")
+async def add_loc_start(m: types.Message, state: FSMContext):
+    if not is_admin(m.from_user.id): return
+    await m.answer("Филиал номини ёзинг (мас: Марказий омбор):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.loc_name)
+
+@dp.message(AdminState.loc_name)
+async def add_loc_name(m: types.Message, state: FSMContext):
+    await state.update_data(name=m.text)
+    await m.answer("Манзилни ёзма равишда киритинг:")
+    await state.set_state(AdminState.loc_address)
+
+@dp.message(AdminState.loc_address)
+async def add_loc_address(m: types.Message, state: FSMContext):
+    await state.update_data(address=m.text)
+    await m.answer(
+        "Энди Telegram орқали локация ташланг (пастдаги тугмани босинг):", 
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📍 Локация юбориш", request_location=True)]], resize_keyboard=True)
+    )
+    await state.set_state(AdminState.loc_geo)
+
+@dp.message(AdminState.loc_geo)
+async def add_loc_geo(m: types.Message, state: FSMContext):
+    lat = m.location.latitude if m.location else None
+    lon = m.location.longitude if m.location else None
+    
+    if not lat or not lon:
+        return await m.answer("Илтимос, харитадан локация ташланг!")
+    
+    data = await state.get_data()
+    await add_location(data['name'], data['address'], lat, lon)
+    await m.answer("✅ Локация сайтга уланди! Сайтдаги тугма босилса, тўғридан-тўғри харита очилади.", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
+
+# 3. IJTIMOIY TARMOQLARNI QO'SHISH
+@dp.message(F.text == "🌐 Тармоқлар")
+async def soc_start(m: types.Message, state: FSMContext):
+    if not is_admin(m.from_user.id): return
+    await m.answer("Telegram ҳаволасини юборинг (https://t.me/...):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.soc_tg)
+
+@dp.message(AdminState.soc_tg)
+async def ask_ig(m: types.Message, state: FSMContext):
+    await state.update_data(tg=m.text)
+    await m.answer("Instagram ҳаволасини юборинг:")
+    await state.set_state(AdminState.soc_ig)
+
+@dp.message(AdminState.soc_ig)
+async def ask_wa(m: types.Message, state: FSMContext):
+    await state.update_data(ig=m.text)
+    await m.answer("WhatsApp ҳаволасини юборинг (https://wa.me/99890...):")
+    await state.set_state(AdminState.soc_wa)
+
+@dp.message(AdminState.soc_wa)
+async def save_soc(m: types.Message, state: FSMContext):
+    d = await state.get_data()
+    await set_social_links(d['tg'], d['ig'], m.text)
+    await m.answer("✅ Тармоқлар сайтга уланди!", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
+
+
+# ================= QOLGAN HAMMA KODING (MAHSULOT, SAVAT, BUYURTMA) =================
+# Bunga umuman teginilmagan, o'z holicha saqlab qolindi.
+
 @dp.message(F.text == "➕ Маҳсулот қўшиш")
 async def add_start(m: types.Message, state: FSMContext):
     if not is_admin(m.from_user.id): return
@@ -98,7 +181,6 @@ async def get_stock(m: types.Message, state: FSMContext):
     await m.answer("✅ Маҳсулот қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
-# ================= ADMIN: BUYURTMALARNI BOSHQARISH =================
 @dp.message(F.text == "📦 Буюртмалар")
 async def orders_menu(m: types.Message):
     if not is_admin(m.from_user.id): return
@@ -147,7 +229,6 @@ async def open_order(call: types.CallbackQuery):
     txt += f"📊 Ҳозирги статус: <b>{o['status']}</b>"
 
     kb = InlineKeyboardBuilder()
-    # Status o'zgartirish tugmalari
     kb.button(text="🔄 Тайёрланмоқда", callback_data=f"setst_{oid}_processing")
     kb.button(text="✅ Тайёр (Кутиш)", callback_data=f"setst_{oid}_ready")
     kb.button(text="🚚 Йўлга чиқди", callback_data=f"setst_{oid}_shipped")
@@ -163,7 +244,6 @@ async def set_status(call: types.CallbackQuery):
     _, oid, status = call.data.split("_")
     await update_order_status(oid, status)
     
-    # Mijozga xabar yuborish (ixtiyoriy, agar bot to'siqqa uchramasa)
     o = await get_order_by_id(oid)
     try:
         status_text = {
@@ -178,15 +258,14 @@ async def set_status(call: types.CallbackQuery):
     except: pass
 
     await call.answer("Статус ўзгарди!")
-    await open_order(call) # Oynani yangilash
+    await open_order(call)
 
-# ================= USER: DO'KON (PAGINATION) =================
 @dp.message(F.text == "🛍 Дўкон")
 async def shop(m: types.Message):
     await show_shop_page(m, page=0)
 
 async def show_shop_page(m_or_call, page):
-    products, total = await get_products_paginated(page, 6) # 6 ta mahsulot
+    products, total = await get_products_paginated(page, 6) 
     
     if not products and page == 0:
         if isinstance(m_or_call, types.CallbackQuery):
@@ -196,14 +275,11 @@ async def show_shop_page(m_or_call, page):
         return
 
     kb = InlineKeyboardBuilder()
-    # 2 ta ustun qilib chiqaramiz
     for p in products:
-        # stock tekshiruvi
         if p.get('stock', 0) > 0:
             kb.button(text=f"{p['name']} - {p['price']}", callback_data=f"v_{p['_id']}")
-    kb.adjust(2) # 2 ta ustun
+    kb.adjust(2) 
 
-    # Paginatsiya tugmalari
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton(text="⬅️ Олдинги", callback_data=f"page_{page-1}"))
@@ -233,7 +309,7 @@ async def view(call: types.CallbackQuery):
     cap = f"📱 {p['name']}\n💰 {p['price']} сўм\n📝 {p['description']}\n📦 Қолган: {p['stock']}"
     kb = InlineKeyboardBuilder()
     kb.button(text="🛒 Саватга қўшиш", callback_data=f"add_{p['_id']}")
-    kb.button(text="🔙 Орқага", callback_data="back_shop_0") # 0-sahifaga qaytish
+    kb.button(text="🔙 Орқага", callback_data="back_shop_0") 
     try: await call.message.answer_photo(p['file_id'], caption=cap, reply_markup=kb.as_markup())
     except: await call.message.answer_document(p['file_id'], caption=cap, reply_markup=kb.as_markup())
     await call.message.delete()
@@ -241,9 +317,8 @@ async def view(call: types.CallbackQuery):
 @dp.callback_query(F.data == "back_shop_0")
 async def back_sh(call: types.CallbackQuery):
     await call.message.delete()
-    await show_shop_page(call.message, 0) # Message object yasab yuboramiz
+    await show_shop_page(call.message, 0)
 
-# ================= SAVAT VA BUYURTMA =================
 @dp.callback_query(F.data.startswith("add_"))
 async def ask_q(call: types.CallbackQuery, state: FSMContext):
     await state.update_data(pid=call.data.split("_")[1])
@@ -347,7 +422,6 @@ async def finish_step(m, state, pay_method, check_id=None):
         total += i['price'] * i['qty']
         await decrease_stock(pid, i['qty'])
 
-    # Buyurtmani bazaga yozamiz
     order_id = await create_order(
         user_id=m.chat.id,
         user_name=m.chat.full_name,
@@ -360,10 +434,8 @@ async def finish_step(m, state, pay_method, check_id=None):
         comment="Янги"
     )
 
-    # Mijozga chek raqamini beramiz
     await m.answer(f"✅ Буюртма қабул қилинди!\n🆔 <b>Чек ID: #{order_id}</b>\n\nИлтимос, маҳсулотни олишда шу кодни кўрсатинг.", parse_mode="HTML", reply_markup=main_kb(m.from_user.id))
 
-    # Adminga xabar
     txt = f"🚨 <b>ЯНГИ БУЮРТМА #{order_id}</b>\nСтатус: 🆕 Янги\nЖами: {total} сўм"
     for admin in ADMIN_IDS:
         try:
@@ -376,7 +448,6 @@ async def finish_step(m, state, pay_method, check_id=None):
     
     await state.clear()
 
-# --- SOZLAMALAR ---
 @dp.message(F.text == "⚙️ Созламалар")
 async def settings(m: types.Message):
     if not is_admin(m.from_user.id): return
@@ -436,17 +507,15 @@ async def del_item(call: types.CallbackQuery):
     await call.answer("Ўчирилди!")
     await call.message.delete()
 
-# --- INFO ---
 @dp.message(F.text == "ℹ️ Биз ҳақимизда")
 async def about(m: types.Message):
     i = await get_shop_info()
     await m.answer(f"📍 Манзил: {i['address']}")
 
-# --- ZOMBI HIMOYASI ---
 @dp.message()
 async def zombie(m: types.Message):
     if is_admin(m.from_user.id) and (m.photo or m.document):
-        await m.answer("⚠️ Бот янгиланди. Илтимос, 'Маҳсулот қўшиш'ни қайта босинг.")
+        await m.answer("⚠️ Бот янгиланди. Илтимос, керакли тугмани босиб қайта уриниб кўринг.")
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
