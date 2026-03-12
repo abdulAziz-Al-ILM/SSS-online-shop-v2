@@ -80,7 +80,14 @@ async def set_social_links(tg, ig, wa):
         {"$set": {"telegram": tg, "instagram": ig, "whatsapp": wa}}, 
         upsert=True
     )
+# ... (oldingi kodlar joyida)
+async def set_logo(file_id):
+    await settings_col.update_one({"type": "logo"}, {"$set": {"file_id": file_id}}, upsert=True)
 
+async def get_logo():
+    logo = await settings_col.find_one({"type": "logo"})
+    return logo['file_id'] if logo else None
+# ...
 # --- SAYT UCHUN YANGI BO'LIMLAR ---
 async def add_service(name, desc):
     await services_col.insert_one({"name": name, "description": desc, "icon": "fa-solid fa-tools"})
