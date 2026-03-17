@@ -72,8 +72,7 @@ def main_kb(user_id):
         rows.append([KeyboardButton(text="📦 Буюртмалар"), KeyboardButton(text="➕ Маҳсулот")])
         rows.append([KeyboardButton(text="🛠 Хизмат"), KeyboardButton(text="📍 Филиал")])
         rows.append([KeyboardButton(text="🔥 Аксия"), KeyboardButton(text="🖼 Логотип")])
-        rows.append([KeyboardButton(text="📹 Трейлер юклаш"), KeyboardButton(text="⚙️ Тармоқлар ва инфо")])
-        rows.append([KeyboardButton(text="⚙️ Созламалар"), KeyboardButton(text="🗑 Маълумот ўчириш")])
+        rows.append([KeyboardButton(text="⚙️ Тармоқлар ва инфо")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 # =====================================================================
