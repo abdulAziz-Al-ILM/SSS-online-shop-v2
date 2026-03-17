@@ -143,10 +143,19 @@ async def admin_loc_save(m: types.Message, state: FSMContext):
     await state.clear()
 
 @dp.message(F.text == "🔥 Аксия")
-async def admin_add_ad(m: types.Message, state: FSMContext):
+async def admin_ad_menu(m: types.Message):
     if not is_admin(m.from_user.id): return
-    await m.answer("Аксия сарлавҳаси:", reply_markup=ReplyKeyboardRemove())
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Қўшиш", callback_data="ad_add")
+    kb.button(text="❌ Ўчириш", callback_data="dl_ad")
+    kb.adjust(2)
+    await m.answer("Аксияни бошқариш:", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data == "ad_add")
+async def admin_add_ad_start(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("Аксия сарлавҳаси:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(AdminState.ad_title)
+    await call.message.delete()
 
 @dp.message(AdminState.ad_title)
 async def admin_ad_title(m: types.Message, state: FSMContext):
