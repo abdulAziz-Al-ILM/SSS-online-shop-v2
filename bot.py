@@ -260,11 +260,21 @@ async def admin_info_final(m: types.Message, state: FSMContext):
 # =====================================================================
 
 @dp.message(F.text == "➕ Маҳсулот")
-async def admin_add_p(m: types.Message, state: FSMContext):
+async def admin_product_menu(m: types.Message):
     if not is_admin(m.from_user.id): return
-    await m.answer("📸 Маҳсулот расмини юборинг:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(AdminState.photo)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Қўшиш", callback_data="prod_add")
+    kb.button(text="❌ Ўчириш", callback_data="dp_l")
+    kb.button(text="📦 Омборни таҳрирлаш", callback_data="es_l")
+    kb.adjust(1)
+    await m.answer("Маҳсулотларни бошқариш:", reply_markup=kb.as_markup())
 
+@dp.callback_query(F.data == "prod_add")
+async def admin_add_p_start(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("📸 Маҳсулот расмини юборинг:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.photo)
+    await call.message.delete()
+    
 @dp.message(AdminState.photo, F.photo)
 async def admin_p_photo(m: types.Message, state: FSMContext):
     await state.update_data(file_id=m.photo[-1].file_id)
@@ -468,15 +478,6 @@ async def admin_del_exec(call: CallbackQuery):
         
     await call.answer("✅ Муваффақиятли ўчирилди!")
     await call.message.delete()
-
-@dp.message(F.text == "⚙️ Созламалар")
-async def admin_extra(m: types.Message):
-    if not is_admin(m.from_user.id): return
-    kb = InlineKeyboardBuilder()
-    kb.button(text="📦 Омбор", callback_data="es_l")
-    kb.button(text="❌ Маҳсулотни ўчириш", callback_data="dp_l")
-    kb.adjust(1)
-    await m.answer("Танланг:", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data == "es_l")
 async def admin_es_list(call: CallbackQuery):
