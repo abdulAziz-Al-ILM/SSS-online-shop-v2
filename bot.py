@@ -98,15 +98,24 @@ async def start_handler(m: types.Message, state: FSMContext):
 # =====================================================================
 
 @dp.message(F.text == "🛠 Хизмат")
-async def admin_add_srv(m: types.Message, state: FSMContext):
+async def admin_srv_menu(m: types.Message):
     if not is_admin(m.from_user.id): return
-    await m.answer("Янги хизмат номи:", reply_markup=ReplyKeyboardRemove())
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Қўшиш", callback_data="srv_add")
+    kb.button(text="❌ Ўчириш", callback_data="dl_srv")
+    kb.adjust(2)
+    await m.answer("Хизматни бошқариш:", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data == "srv_add")
+async def admin_add_srv_start(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("Янги хизмат номи:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(AdminState.srv_name)
+    await call.message.delete()
 
 @dp.message(AdminState.srv_name)
 async def admin_srv_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text)
-    await m.answer("Хизмат ҳақида қисқача маълумот ёзинг:")
+    await m.answer("Хизмат ҳақида қисқача маълумот ёзинг:")    
     await state.set_state(AdminState.srv_desc)
 
 @dp.message(AdminState.srv_desc)
@@ -117,10 +126,19 @@ async def admin_srv_save(m: types.Message, state: FSMContext):
     await state.clear()
 
 @dp.message(F.text == "📍 Филиал")
-async def admin_add_loc(m: types.Message, state: FSMContext):
+async def admin_loc_menu(m: types.Message):
     if not is_admin(m.from_user.id): return
-    await m.answer("Филиал номи:", reply_markup=ReplyKeyboardRemove())
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Қўшиш", callback_data="loc_add")
+    kb.button(text="❌ Ўчириш", callback_data="dl_loc")
+    kb.adjust(2)
+    await m.answer("Филиални бошқариш:", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data == "loc_add")
+async def admin_add_loc_start(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("Филиал номи:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(AdminState.loc_name)
+    await call.message.delete()
 
 @dp.message(AdminState.loc_name)
 async def admin_loc_name(m: types.Message, state: FSMContext):
