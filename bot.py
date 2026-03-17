@@ -193,66 +193,71 @@ async def admin_logo_save(m: types.Message, state: FSMContext):
     await m.answer("✅ Логотип янгиланди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
-@dp.message(F.text == "📹 Трейлер юклаш")
-async def admin_trailer(m: types.Message, state: FSMContext):
-    if not is_admin(m.from_user.id): return
-    await m.answer("📹 Видео-трейлер юборинг (MP4 ёки файл):", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(AdminState.trailer_video)
-
-@dp.message(AdminState.trailer_video, (F.video | F.document))
-async def admin_trailer_save(m: types.Message, state: FSMContext):
-    fid = m.video.file_id if m.video else m.document.file_id
-    await set_trailer(fid)
-    await m.answer("✅ Видео-трейлер янгиланди!", reply_markup=main_kb(m.from_user.id))
-    await state.clear()
+# =====================================================================
+# INFO & TARMOQLAR
+# =====================================================================
 
 # =====================================================================
 # INFO & TARMOQLAR
 # =====================================================================
 
 @dp.message(F.text == "⚙️ Тармоқлар ва инфо")
-async def admin_info_manage(m: types.Message, state: FSMContext):
+async def admin_info_manage(m: types.Message):
     if not is_admin(m.from_user.id): return
-    await m.answer("Сайтда чиқадиган телефон рақам:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(AdminState.info_phone)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📞 Телефон", callback_data="edit_info_phone")
+    kb.button(text="📍 Манзил", callback_data="edit_info_address")
+    kb.button(text="ℹ️ Биз ҳақида", callback_data="edit_info_about")
+    kb.button(text="📢 ТГ Канал", callback_data="edit_soc_ch")
+    kb.button(text="📸 Instagram", callback_data="edit_soc_ig")
+    kb.button(text="💬 WhatsApp", callback_data="edit_soc_wa")
+    kb.adjust(2)
+    await m.answer("Қайси маълумотни ўзгартирмоқчисиз?", reply_markup=kb.as_markup())
 
-@dp.message(AdminState.info_phone)
-async def admin_info_ph(m: types.Message, state: FSMContext):
-    await state.update_data(phone=m.text)
-    await m.answer("Асосий манзилни ёзинг:")
-    await state.set_state(AdminState.info_address)
+@dp.callback_query(F.data.startswith("edit_"))
+async def admin_edit_info_start(call: CallbackQuery, state: FSMContext):
+    field = call.data.replace("edit_", "")
+    prompts = {
+        "info_phone": ("📞 Янги телефон рақамни ёзинг:", AdminState.info_phone),
+        "info_address": ("📍 Янги манзилни ёзинг:", AdminState.info_address),
+        "info_about": ("ℹ️ Фирма ҳақида янги маълумот ёзинг:", AdminState.info_about),
+        "soc_ch": ("📢 Янги Telegram канал ҳаволасини ёзинг:", AdminState.soc_ch),
+        "soc_ig": ("📸 Янги Instagram ҳаволасини ёзинг:", AdminState.soc_ig),
+        "soc_wa": ("💬 Янги WhatsApp ҳаволасини ёзинг:", AdminState.soc_wa)
+    }
+    await call.message.answer(prompts[field][0], reply_markup=ReplyKeyboardRemove())
+    await state.set_state(prompts[field][1])
+    await call.message.delete()
 
-@dp.message(AdminState.info_address)
-async def admin_info_addr(m: types.Message, state: FSMContext):
-    await state.update_data(address=m.text)
-    await m.answer("Фирма ҳақида қисқача таъриф:")
-    await state.set_state(AdminState.info_about)
-
-@dp.message(AdminState.info_about)
-async def admin_info_ab(m: types.Message, state: FSMContext):
-    await state.update_data(about=m.text)
-    await m.answer("Telegram канал ҳаволаси:")
-    await state.set_state(AdminState.soc_ch)
-
-@dp.message(AdminState.soc_ch)
-async def admin_soc_ch(m: types.Message, state: FSMContext):
-    await state.update_data(ch=m.text)
-    await m.answer("Instagram ҳаволаси:")
-    await state.set_state(AdminState.soc_ig)
-
-@dp.message(AdminState.soc_ig)
-async def admin_soc_ig(m: types.Message, state: FSMContext):
-    await state.update_data(ig=m.text)
-    await m.answer("WhatsApp ҳаволаси:")
-    await state.set_state(AdminState.soc_wa)
-
-@dp.message(AdminState.soc_wa)
-async def admin_info_final(m: types.Message, state: FSMContext):
-    d = await state.get_data()
+@dp.message(StateFilter(AdminState.info_phone, AdminState.info_address, AdminState.info_about, AdminState.soc_ch, AdminState.soc_ig, AdminState.soc_wa))
+async def admin_info_save_single(m: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+    
+    # Eski ma'lumotlar o'chib ketmasligi uchun ularni bazadan tortib olamiz
+    info = await get_combined_info()
+    address = info.get("address", "")
+    phone = info.get("phone", "")
+    about = info.get("about", "")
+    ch = info.get("telegram_channel", "")
+    ig = info.get("instagram", "")
+    wa = info.get("whatsapp", "")
+    
     bot_info = await bot.get_me()
-    await set_shop_info(d['address'], d['phone'], d['about'])
-    await set_social_links(f"https://t.me/{bot_info.username}", d['ig'], m.text, d['ch'])
-    await m.answer("✅ Барча маълумотлар янгиланди!", reply_markup=main_kb(m.from_user.id))
+    tg = f"https://t.me/{bot_info.username}"
+
+    # Qaysi tugma bosilgan bo'lsa, faqat o'shaning qiymatini yangilaymiz
+    if current_state == AdminState.info_phone.state: phone = m.text
+    elif current_state == AdminState.info_address.state: address = m.text
+    elif current_state == AdminState.info_about.state: about = m.text
+    elif current_state == AdminState.soc_ch.state: ch = m.text
+    elif current_state == AdminState.soc_ig.state: ig = m.text
+    elif current_state == AdminState.soc_wa.state: wa = m.text
+
+    # Yangilangan to'plamni bazaga qaytarib saqlaymiz
+    await set_shop_info(address, phone, about)
+    await set_social_links(tg, ig, wa, ch)
+    
+    await m.answer("✅ Маълумот муваффақиятли янгиланди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
 # =====================================================================
