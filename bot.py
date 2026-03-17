@@ -455,12 +455,18 @@ async def admin_del_list(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("ex_d"))
 async def admin_del_exec(call: CallbackQuery):
-    a = call.data.split("_")[1]
-    p, oid = a[:4], a[4:]
-    if p == "dsrv": await delete_service(oid)
-    elif p == "dloc": await delete_location(oid)
-    elif p == "dad": await delete_ad(oid)
-    await call.answer("Ўчирилди!")
+    parts = call.data.split("_")
+    p = parts[1]    # 'dsrv', 'dloc' yoki 'dad'
+    oid = parts[2]  # Bazadagi haqiqiy ID
+    
+    if p == "dsrv": 
+        await delete_service(oid)
+    elif p == "dloc": 
+        await delete_location(oid)
+    elif p == "dad": 
+        await delete_ad(oid)
+        
+    await call.answer("✅ Муваффақиятли ўчирилди!")
     await call.message.delete()
 
 @dp.message(F.text == "⚙️ Созламалар")
