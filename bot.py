@@ -53,9 +53,12 @@ class AdminState(StatesGroup):
 
 class UserState(StatesGroup):
     input_qty = State()
+    delivery_type = State()
     phone = State()
     location = State()
     check_photo = State()
+    pay_method = State()
+   
 
 # =====================================================================
 # KEYBOARDS (TUGMALAR)
@@ -210,10 +213,6 @@ async def admin_logo_save(m: types.Message, state: FSMContext):
     await set_logo(m.photo[-1].file_id)
     await m.answer("✅ Логотип янгиланди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
-
-# =====================================================================
-# INFO & TARMOQLAR
-# =====================================================================
 
 # =====================================================================
 # INFO & TARMOQLAR
@@ -488,19 +487,138 @@ async def user_cart_clr(call: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "u_checkout")
 async def user_checkout_start(call: CallbackQuery, state: FSMContext):
-    await call.message.answer("Телефон рақамингизни юборинг:", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📱 Юбориш", request_contact=True)]], resize_keyboard=True))
+    # 1. Eng birinchi yetkazish usuli so'raladi
+    kb = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="🚕 Етказиб бериш (Такси)"), KeyboardButton(text="🚶‍♂️ Ўзим олиб кетаман")],
+        [KeyboardButton(text="❌ Бекор қилиш")]
+    ], resize_keyboard=True)
+    await call.message.answer("Етказиб бериш усулини танланг:", reply_markup=kb)
+    await state.set_state(UserState.delivery_type)
+    await call.message.delete()
+
+@dp.message(F.text == "❌ Бекор қилиш")
+async def cancel_checkout(m: types.Message, state: FSMContext):
+    # Xaridor xohlagan payti otmen qilishi mumkin
+    await state.set_state(None)
+    await m.answer("Буюртма бекор қилинди.", reply_markup=main_kb(m.from_user.id))
+
+@dp.message(UserState.delivery_type)
+async def user_delivery_get(m: types.Message, state: FSMContext):
+    # 2. Xaridor tugmani bosgach, nima bosganini tekshiramiz
+    if m.text not in ["🚕 Етказиб бериш (Такси)", "🚶‍♂️ Ўзим олиб кетаман"]:
+        return await m.answer("Илтимос, пастдаги тугмалардан бирини танланг!")
+    
+    await state.update_data(delivery_type=m.text) # Xotiraga saqladik
+    
+    # Agar taksi desa, lokatsiya so'raymiz
+    if m.text == "🚕 Етказиб бериш (Такси)":
+        kb = ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="📍 Локация юбориш", request_location=True)], 
+            [KeyboardButton(text="❌ Бекор қилиш")]
+        ], resize_keyboard=True)
+        await m.answer("Манзилингизни (Локация) юборинг ёки матн кўринишида ёзинг:", reply_markup=kb)
+        await state.set_state(UserState.location)
+    # Agar o'zim olib ketaman desa, manzil kerak emas, to'g'ridan-to'g'ri nomer so'raymiz
+    else:
+        await state.update_data(location="Дўкондан олиб кетиш")
+        kb = ReplyKeyboardMarkup(keyboard=[
+            [KeyboardButton(text="📱 Рақамни юбориш", request_contact=True)], 
+            [KeyboardButton(text="❌ Бекор қилиш")]
+        ], resize_keyboard=True)
+        await m.answer("Телефон рақамингизни юборинг ёки ёзинг:", reply_markup=kb)
+        await state.set_state(UserState.phone)
+
+@dp.message(UserState.location)
+async def user_location_get(m: types.Message, state: FSMContext):
+    # 3. Lokatsiya kelgach, uni saqlab, endi telefon nomer so'raymiz
+    loc = f"{m.location.latitude},{m.location.longitude}" if m.location else m.text
+    await state.update_data(location=loc)
+    
+    kb = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="📱 Рақамни юбориш", request_contact=True)], 
+        [KeyboardButton(text="❌ Бекор қилиш")]
+    ], resize_keyboard=True)
+    await m.answer("Телефон рақамингизни юборинг ёки ёзинг:", reply_markup=kb)
     await state.set_state(UserState.phone)
 
 @dp.message(UserState.phone)
 async def user_phone_get(m: types.Message, state: FSMContext):
-    await state.update_data(phone=m.contact.phone_number if m.contact else m.text)
+    # 4. Telefon kelgach, endi to'lov usulini so'raymiz
+    phone = m.contact.phone_number if m.contact else m.text
+    await state.update_data(phone=phone)
+    
+    kb = ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text="💵 Нақд пул"), KeyboardButton(text="💳 Пластик карта")],
+        [KeyboardButton(text="❌ Бекор қилиш")]
+    ], resize_keyboard=True)
+    await m.answer("Тўлов усулини танланг:", reply_markup=kb)
+    await state.set_state(UserState.pay_method)
+
+@dp.message(UserState.pay_method)
+async def user_pay_method_get(m: types.Message, state: FSMContext):
+    # 5. To'lov usuli tanlangach...
+    if m.text not in ["💵 Нақд пул", "💳 Пластик карта"]:
+        return await m.answer("Илтимос, тугмалардан бирини танланг!")
+        
+    await state.update_data(pay_method=m.text)
+    
+    # Agar Karta tanlasa, karta raqamini berib rasmini so'raymiz
+    if m.text == "💳 Пластик карта":
+        await m.answer(f"Тўловни қуйидаги картага амалга оширинг:\n\n💳 <b>{CARD_NUMBER}</b>\n\nТўлов қилгач, скриншот (чек) ни шу ерга юборинг:", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+        await state.set_state(UserState.check_photo)
+    # Agar naqd bo'lsa, rasmni kutmasdan buyurtmani yopamiz
+    else:
+        await finish_order(m, state)
+
+@dp.message(UserState.check_photo, F.photo)
+async def user_check_get(m: types.Message, state: FSMContext):
+    # 6. Rasm kelgach, uni xotiraga olib buyurtmani yopamiz
+    await state.update_data(check_file_id=m.photo[-1].file_id)
+    await finish_order(m, state)
+    
+@dp.message(UserState.check_photo)
+async def user_check_invalid(m: types.Message):
+    # Agar rasm o'rniga yozuv tashlasa so'kish
+    await m.answer("Илтимос, тўлов чекини фақат расм (скриншот) кўринишида юборинг!")
+
+async def finish_order(m: types.Message, state: FSMContext):
+    # 7. Final. Xotiradagi barcha ma'lumotlarni yig'amiz
     d = await state.get_data()
     cart = d.get("cart", {})
     total = sum(i['price'] * i['qty'] for i in cart.values())
-    oid = await create_order(m.from_user.id, m.from_user.full_name, d['phone'], cart, total, "Нақд", "Етказиб", "Йўқ", "Янги")
+    
+    delivery = d.get('delivery_type', 'Noma\'lum')
+    location = d.get('location', 'Noma\'lum')
+    phone = d.get('phone', 'Noma\'lum')
+    pay = d.get('pay_method', 'Noma\'lum')
+    check = d.get('check_file_id', 'Йўқ')
+    
+    # Bazaga yozamiz. Chek rasmini ID sini comment ustuniga tiqib yubordim.
+    oid = await create_order(m.from_user.id, m.from_user.full_name, phone, cart, total, pay, delivery, location, f"Чек ID: {check}")
+    
+    # Ombordan mahsulotlarni ayiramiz
     for pid, i in cart.items(): await decrease_stock(pid, i['qty'])
-    await m.answer(f"✅ Буюртма қабул қилинди! Чек ID: #{oid}", reply_markup=main_kb(m.from_user.id))
-    for a in ADMIN_IDS: await bot.send_message(a, f"🚨 Янги буюртма: #{oid}")
+    
+    await m.answer(f"✅ Буюртма қабул қилинди! Чек ID: #{oid}\nТез орада алоқага чиқамиз.", reply_markup=main_kb(m.from_user.id))
+    
+    # Adminga boradigan xabarni tayyorlaymiz
+    admin_text = f"🚨 <b>ЯНГИ БУЮРТМА: #{oid}</b>\n👤 Исм: {m.from_user.full_name}\n📞 Тел: {phone}\n🚕 Усул: {delivery}\n📍 Манзил: {location}\n💵 Тўлов: {pay}\n💰 Сумма: {total} сўм"
+    
+    for a in ADMIN_IDS:
+        # Agar karta orqali to'lagan bo'lsa adminga rasmi bilan boradi
+        if check != 'Йўқ':
+            await bot.send_photo(a, photo=check, caption=admin_text, parse_mode="HTML")
+        # Agar naqd bo'lsa oddiy xabar
+        else:
+            await bot.send_message(a, admin_text, parse_mode="HTML")
+            # Agar haqiqiy lokatsiya tashlagan bo'lsa, xaritadagi nuqtani ham adminga alohida tashlaymiz
+            if location != "Дўкондан олиб кетиш" and "," in location:
+                try:
+                    lat, lon = location.split(",")
+                    await bot.send_location(a, latitude=float(lat), longitude=float(lon))
+                except: pass
+            
+    # Savatni va xotirani tozalash
     await state.update_data(cart={})
     await state.set_state(None)
 
