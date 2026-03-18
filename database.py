@@ -25,6 +25,7 @@ try:
     services_col = db['services']
     locations_col = db['locations']
     ads_col = db['ads']
+    bases_col = db['bases'] # ЯНГИ: Базалар коллекцияси
     
     logger.info("MongoDB ulanishi 100% muvaffaqiyatli!")
 except Exception as e:
@@ -34,8 +35,7 @@ except Exception as e:
 # 1. MAHSULOTLAR (PRODUCTS) MANTIQI
 # =====================================================================
 
-# add_product funksiyasini quyidagiga almashtir:
-async def add_product(name, price, stock, file_id, description, category):
+async def add_product(name, price, stock, file_id, description, category, delivery_size):
     try:
         doc = {
             "name": name,
@@ -43,7 +43,8 @@ async def add_product(name, price, stock, file_id, description, category):
             "stock": int(stock),
             "file_id": file_id,
             "description": description,
-            "category": category, # YANNGI QATOR
+            "category": category,
+            "delivery_size": delivery_size, # ЯНГИ: Транспорт тури
             "created_at": time.time()
         }
         result = await products_col.insert_one(doc)
@@ -52,7 +53,6 @@ async def add_product(name, price, stock, file_id, description, category):
         logger.error(f"add_product xatosi: {e}")
         return None
 
-# Ushbu ikkita yangi funksiyani faylga qo'sh:
 async def get_categories():
     """Barcha mavjud kategoriyalarni olish"""
     try:
@@ -277,12 +277,10 @@ async def set_logo(file_id):
         return False
 
 async def set_trailer(file_id):
-    """Sayt headeri uchun video file_id (trailer) saqlash"""
     try:
-        # BUNDA FILE_ID'NI TRAILER_ID KALITI OSTIDA SAQLAYMIZ (SAYT BILAN BIR XIL BO'LISHI UCHUN)
         await settings_col.update_one(
             {"type": "trailer"}, 
-            {"$set": {"trailer_id": file_id}}, # MUHIM: trailer_id deb yozdik
+            {"$set": {"trailer_id": file_id}}, 
             upsert=True
         )
         return True
@@ -295,7 +293,6 @@ async def set_trailer(file_id):
 # =====================================================================
 
 async def get_combined_info():
-    """FastAPI (Website) uchun barcha ma'lumotlarni yig'ish"""
     try:
         info = await settings_col.find_one({"type": "info"}) or {}
         socials = await settings_col.find_one({"type": "socials"}) or {}
@@ -311,8 +308,35 @@ async def get_combined_info():
             "instagram": socials.get("instagram", "#"),
             "whatsapp": socials.get("whatsapp", "#"),
             "logo_id": logo.get("file_id"),
-            "trailer_id": trailer.get("trailer_id") # BU YERDA HAM TRAILER_ID
+            "trailer_id": trailer.get("trailer_id") 
         }
     except Exception as e:
         logger.error(f"get_combined_info xatosi: {e}")
         return {}
+
+# =====================================================================
+# 6. БАЗАЛАР (ЙЎЛ КИРА ҲИСОБЛАШ НУҚТАЛАРИ УЧУН)
+# =====================================================================
+
+async def add_base(name, lat, lon):
+    try:
+        await bases_col.insert_one({"name": name, "lat": lat, "lon": lon})
+        return True
+    except Exception as e:
+        logger.error(f"add_base xatosi: {e}")
+        return False
+
+async def get_all_bases():
+    try:
+        return await bases_col.find().to_list(length=100)
+    except Exception as e:
+        logger.error(f"get_all_bases xatosi: {e}")
+        return []
+
+async def delete_base(bid):
+    try:
+        await bases_col.delete_one({"_id": ObjectId(bid)})
+        return True
+    except Exception as e:
+        logger.error(f"delete_base xatosi: {e}")
+        return False
