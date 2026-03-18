@@ -27,6 +27,7 @@ dp = Dispatcher(storage=MemoryStorage())
 # =====================================================================
 
 class AdminState(StatesGroup):
+    category = State()
     photo = State()
     name = State()
     price = State()
@@ -293,16 +294,22 @@ async def admin_product_menu(m: types.Message):
 
 @dp.callback_query(F.data == "prod_add")
 async def admin_add_p_start(call: CallbackQuery, state: FSMContext):
-    await call.message.answer("📸 Маҳсулот расмини юборинг:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(AdminState.photo)
+    await call.message.answer("📁 Маҳсулот категориясини ёзинг (мас: Сантехника, Электр):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.category)
     await call.message.delete()
+
+@dp.message(AdminState.category)
+async def admin_p_category(m: types.Message, state: FSMContext):
+    await state.update_data(category=m.text)
+    await m.answer("📸 Маҳсулот расмини юборинг:")
+    await state.set_state(AdminState.photo)
     
 @dp.message(AdminState.photo, F.photo)
 async def admin_p_photo(m: types.Message, state: FSMContext):
     await state.update_data(file_id=m.photo[-1].file_id)
     await m.answer("Маҳсулот номи:")
     await state.set_state(AdminState.name)
-
+    
 @dp.message(AdminState.name)
 async def admin_p_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text)
@@ -326,7 +333,8 @@ async def admin_p_desc(m: types.Message, state: FSMContext):
 async def admin_p_save(m: types.Message, state: FSMContext):
     if not m.text.isdigit(): return await m.answer("Рақам ёзинг!")
     d = await state.get_data()
-    await add_product(d['name'], d['price'], int(m.text), d['file_id'], d['desc'])
+    # add_product ga d['category'] argumentini qo'shib yuborish
+    await add_product(d['name'], d['price'], int(m.text), d['file_id'], d['desc'], d['category'])
     await m.answer("✅ Маҳсулот қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
@@ -372,23 +380,58 @@ async def admin_ord_save_st(call: CallbackQuery):
     await admin_ord_detail(call)
 
 @dp.message(F.text == "🛍 Дўкон")
-async def user_shop(m: types.Message): await user_shop_page(m, 0)
-
-async def user_shop_page(m_or_call, page):
-    prods, total = await get_products_paginated(page, 6)
-    if not prods: return await (m_or_call.answer("Маҳсулот йўқ") if isinstance(m_or_call, types.Message) else m_or_call.answer("Бўш"))
+async def user_shop(m: types.Message):
+    cats = await get_categories()
+    if not cats: return await m.answer("Маҳсулот йўқ")
     kb = InlineKeyboardBuilder()
-    for p in prods: kb.button(text=f"{p['name']}", callback_data=f"u_v_{p['_id']}")
+    for c in cats:
+        kb.button(text=c, callback_data=f"cat_{c[:20]}") 
     kb.adjust(2)
+    await m.answer("📁 Категорияни танланг:", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data.startswith("cat_"))
+async def user_shop_cat(call: CallbackQuery, state: FSMContext):
+    cat = call.data.replace("cat_", "")
+    await state.update_data(current_cat=cat)
+    await user_shop_page(call, cat, 0)
+
+@dp.callback_query(F.data.startswith("u_p_"))
+async def user_shop_pg(call: CallbackQuery, state: FSMContext):
+    d = await state.get_data()
+    cat = d.get("current_cat")
+    if not cat: return await call.answer("Хатолик: Категория топилмади, қайта киринг", show_alert=True)
+    await user_shop_page(call, cat, int(call.data.split("_")[2]))
+
+# MANA SHU FUNKSIYA SENDA TUSHIB QOLGAN EDI:
+async def user_shop_page(m_or_call, cat, page):
+    prods, total = await get_products_by_category_paginated(cat, page, 6)
+    if not prods: 
+        return await (m_or_call.answer("Маҳсулот йўқ") if isinstance(m_or_call, types.Message) else m_or_call.answer("Бўш", show_alert=True))
+    
+    kb = InlineKeyboardBuilder()
+    for p in prods: 
+        kb.button(text=f"{p['name']}", callback_data=f"u_v_{p['_id']}")
+    kb.adjust(2)
+    
     nav = []
     if page > 0: nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"u_p_{page-1}"))
     if (page + 1) * 6 < total: nav.append(InlineKeyboardButton(text="➡️", callback_data=f"u_p_{page+1}"))
+    
+    # Katalogga qaytish tugmasi
+    nav.append(InlineKeyboardButton(text="🔙 Каталог", callback_data="back_to_cats"))
     if nav: kb.row(*nav)
-    if isinstance(m_or_call, types.Message): await m_or_call.answer("Маҳсулотларимиз:", reply_markup=kb.as_markup())
-    else: await m_or_call.message.edit_text("Маҳсулотларимиз:", reply_markup=kb.as_markup())
+    
+    text = f"📁 Категория: <b>{cat}</b>\nМаҳсулотларимиз:"
+    if isinstance(m_or_call, types.Message): 
+        await m_or_call.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    else: 
+        await m_or_call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
-@dp.callback_query(F.data.startswith("u_p_"))
-async def user_shop_pg(call: CallbackQuery): await user_shop_page(call, int(call.data.split("_")[2]))
+# KATALOGGA QAYTISH HANDLERI HAM TUSHIB QOLGAN EDI:
+@dp.callback_query(F.data == "back_to_cats")
+async def back_to_categories(call: CallbackQuery):
+    await user_shop(call.message)
+    await call.message.delete()
 
 @dp.callback_query(F.data.startswith("u_v_"))
 async def user_p_view(call: CallbackQuery):
@@ -397,8 +440,10 @@ async def user_p_view(call: CallbackQuery):
     kb = InlineKeyboardBuilder()
     kb.button(text="🛒 Саватга қўшиш", callback_data=f"u_a_{p['_id']}")
     kb.button(text="🔙 Орқага", callback_data="u_p_0")
-    try: await call.message.answer_photo(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
-    except: await call.message.answer_document(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
+    try: 
+        await call.message.answer_photo(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
+    except: 
+        await call.message.answer_document(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
     await call.message.delete()
 
 @dp.callback_query(F.data.startswith("u_a_"))
