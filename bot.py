@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import sys
+import math
+import pytz
+from datetime import datetime
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -8,7 +11,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, 
-    InlineKeyboardButton, CallbackQuery, InlineKeyboardMarkup
+    InlineKeyboardButton, CallbackQuery
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -16,11 +19,27 @@ from config import BOT_TOKEN, ADMIN_IDS, CARD_NUMBER
 from database import *
 
 # =====================================================================
-# TIZIMNI SOZLASH
+# TIZIMNI SOZLASH VA MATEMATIKA
 # =====================================================================
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+def get_delivery_time(lang):
+    tz = pytz.timezone('Asia/Bishkek')
+    now = datetime.now(tz)
+    if now.hour < 13:
+        return {"uz": "бугун тушдан кейин", "ru": "сегодня после обеда", "kg": "бүгүн түштөн кийин"}.get(lang, "бугун тушдан кейин")
+    else:
+        return {"uz": "эртага тушгача", "ru": "завтра до обеда", "kg": "эртең түшкө чейин"}.get(lang, "эртага тушгача")
 
 # =====================================================================
 # STATES (HOLATLAR)
@@ -28,6 +47,7 @@ dp = Dispatcher(storage=MemoryStorage())
 
 class AdminState(StatesGroup):
     category = State()
+    delivery_size = State()
     photo = State()
     name = State()
     price = State()
@@ -38,6 +58,8 @@ class AdminState(StatesGroup):
     loc_name = State()
     loc_address = State()
     loc_geo = State()
+    base_name = State()
+    base_geo = State()
     ad_title = State()
     ad_text = State()
     ad_discount = State()
@@ -48,17 +70,16 @@ class AdminState(StatesGroup):
     soc_ig = State()
     soc_wa = State()
     logo_photo = State()
-    trailer_video = State()
     edit_stock_qty = State()
 
 class UserState(StatesGroup):
+    lang = State()
     input_qty = State()
     delivery_type = State()
-    phone = State()
+    upsell_loc = State()
     location = State()
+    phone = State()
     check_photo = State()
-    pay_method = State()
-   
 
 # =====================================================================
 # KEYBOARDS (TUGMALAR)
@@ -75,8 +96,8 @@ def main_kb(user_id):
     if is_admin(user_id):
         rows.append([KeyboardButton(text="📦 Буюртмалар"), KeyboardButton(text="➕ Маҳсулот")])
         rows.append([KeyboardButton(text="🛠 Хизмат"), KeyboardButton(text="📍 Филиал")])
-        rows.append([KeyboardButton(text="🔥 Аксия"), KeyboardButton(text="🖼 Логотип")])
-        rows.append([KeyboardButton(text="⚙️ Тармоқлар ва инфо")])
+        rows.append([KeyboardButton(text="🔥 Аксия"), KeyboardButton(text="🏢 Базалар")])
+        rows.append([KeyboardButton(text="⚙️ Тармоқлар ва инфо"), KeyboardButton(text="🖼 Логотип")])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 # =====================================================================
@@ -97,7 +118,7 @@ async def start_handler(m: types.Message, state: FSMContext):
     await m.answer(f"Салом, {m.from_user.full_name}! SSS Online Shop ботига хуш келибсиз.", reply_markup=main_kb(m.from_user.id))
 
 # =====================================================================
-# ADMIN: SAYT BOSHQARUVI (QO'SHISH)
+# ADMIN: SAYT BOSHQARUVI VA O'CHIRISH
 # =====================================================================
 
 @dp.message(F.text == "🛠 Хизмат")
@@ -125,7 +146,7 @@ async def admin_srv_name(m: types.Message, state: FSMContext):
 async def admin_srv_save(m: types.Message, state: FSMContext):
     d = await state.get_data()
     await add_service(d['name'], m.text)
-    await m.answer("✅ Хизмат сайтга қўшилди!", reply_markup=main_kb(m.from_user.id))
+    await m.answer("✅ Хизмат қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
 @dp.message(F.text == "📍 Филиал")
@@ -153,14 +174,43 @@ async def admin_loc_name(m: types.Message, state: FSMContext):
 async def admin_loc_addr(m: types.Message, state: FSMContext):
     await state.update_data(address=m.text)
     kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📍 Локация юбориш", request_location=True)]], resize_keyboard=True)
-    await m.answer("Энди пастдаги тугма орқали харитадан нуқтани юборинг:", reply_markup=kb)
+    await m.answer("Харитадан нуқтани юборинг:", reply_markup=kb)
     await state.set_state(AdminState.loc_geo)
 
 @dp.message(AdminState.loc_geo, F.location)
 async def admin_loc_save(m: types.Message, state: FSMContext):
     d = await state.get_data()
     await add_location(d['name'], d['address'], m.location.latitude, m.location.longitude)
-    await m.answer("✅ Филиал сайтга қўшилди!", reply_markup=main_kb(m.from_user.id))
+    await m.answer("✅ Филиал қўшилди!", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
+
+@dp.message(F.text == "🏢 Базалар")
+async def admin_base_menu(m: types.Message):
+    if not is_admin(m.from_user.id): return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Қўшиш", callback_data="base_add")
+    kb.button(text="❌ Ўчириш", callback_data="dl_base")
+    kb.adjust(2)
+    await m.answer("Базаларни бошқариш:", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data == "base_add")
+async def admin_add_base_start(call: CallbackQuery, state: FSMContext):
+    await call.message.answer("База номини ёзинг (мас: Марказий омбор):", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.base_name)
+    await call.message.delete()
+
+@dp.message(AdminState.base_name)
+async def admin_base_name(m: types.Message, state: FSMContext):
+    await state.update_data(name=m.text)
+    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="📍 Локация юбориш", request_location=True)]], resize_keyboard=True)
+    await m.answer("Базанинг харитадаги локациясини юборинг:", reply_markup=kb)
+    await state.set_state(AdminState.base_geo)
+
+@dp.message(AdminState.base_geo, F.location)
+async def admin_base_save(m: types.Message, state: FSMContext):
+    d = await state.get_data()
+    await add_base(d['name'], m.location.latitude, m.location.longitude)
+    await m.answer("✅ База қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
 @dp.message(F.text == "🔥 Аксия")
@@ -181,7 +231,7 @@ async def admin_add_ad_start(call: CallbackQuery, state: FSMContext):
 @dp.message(AdminState.ad_title)
 async def admin_ad_title(m: types.Message, state: FSMContext):
     await state.update_data(title=m.text)
-    await m.answer("Аксия ҳақиda маълумот:")
+    await m.answer("Аксия ҳақида маълумот:")
     await state.set_state(AdminState.ad_text)
 
 @dp.message(AdminState.ad_text)
@@ -195,39 +245,51 @@ async def admin_ad_save(m: types.Message, state: FSMContext):
     if not m.text.isdigit(): return await m.answer("Рақам ёзинг!")
     d = await state.get_data()
     await add_ad(d['title'], d['text'], m.text)
-    await m.answer("✅ Аксия сайтга қўшилди!", reply_markup=main_kb(m.from_user.id))
+    await m.answer("✅ Аксия қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
-# =====================================================================
-# MULTIMEDIA (LOGO & TRAILER)
-# =====================================================================
+# --- O'CHIRISH IJROSI (HAMMASI SHU YERDA) ---
+@dp.callback_query(F.data.startswith("dl_"))
+async def admin_del_list(call: CallbackQuery):
+    t = call.data.split("_")[1]
+    kb = InlineKeyboardBuilder()
+    if t == "srv":
+        items = await get_all_services()
+        for i in items: kb.button(text=f"❌ {i['name']}", callback_data=f"ex_dsrv_{i['_id']}")
+    elif t == "loc":
+        items = await get_all_locations()
+        for i in items: kb.button(text=f"❌ {i['name']}", callback_data=f"ex_dloc_{i['_id']}")
+    elif t == "ad":
+        items = await get_all_ads()
+        for i in items: kb.button(text=f"❌ {i['title']}", callback_data=f"ex_dad_{i['_id']}")
+    elif t == "base":
+        items = await get_all_bases()
+        for i in items: kb.button(text=f"❌ {i['name']}", callback_data=f"ex_dbase_{i['_id']}")
+    kb.adjust(1)
+    await call.message.edit_text("Ўчириладиган элементни танланг:", reply_markup=kb.as_markup())
 
-@dp.message(F.text == "🖼 Логотип")
-async def admin_logo(m: types.Message, state: FSMContext):
-    if not is_admin(m.from_user.id): return
-    await m.answer("📸 Янги логотип учун расm юборинг:", reply_markup=ReplyKeyboardRemove())
-    await state.set_state(AdminState.logo_photo)
-
-@dp.message(AdminState.logo_photo, F.photo)
-async def admin_logo_save(m: types.Message, state: FSMContext):
-    await set_logo(m.photo[-1].file_id)
-    await m.answer("✅ Логотип янгиланди!", reply_markup=main_kb(m.from_user.id))
-    await state.clear()
+@dp.callback_query(F.data.startswith("ex_d"))
+async def admin_del_exec(call: CallbackQuery):
+    parts = call.data.split("_")
+    p = parts[1]
+    oid = parts[2]
+    if p == "dsrv": await delete_service(oid)
+    elif p == "dloc": await delete_location(oid)
+    elif p == "dad": await delete_ad(oid)
+    elif p == "dbase": await delete_base(oid)
+    await call.answer("✅ Ўчирилди!", show_alert=True)
+    await call.message.delete()
 
 # =====================================================================
-# INFO & TARMOQLAR
+# INFO, MAHSULOT QO'SHISH, BUYURTMALAR
 # =====================================================================
 
 @dp.message(F.text == "⚙️ Тармоқлар ва инфо")
 async def admin_info_manage(m: types.Message):
     if not is_admin(m.from_user.id): return
     kb = InlineKeyboardBuilder()
-    kb.button(text="📞 Телефон", callback_data="edit_info_phone")
-    kb.button(text="📍 Манзил", callback_data="edit_info_address")
-    kb.button(text="ℹ️ Биз ҳақида", callback_data="edit_info_about")
-    kb.button(text="📢 ТГ Канал", callback_data="edit_soc_ch")
-    kb.button(text="📸 Instagram", callback_data="edit_soc_ig")
-    kb.button(text="💬 WhatsApp", callback_data="edit_soc_wa")
+    for txt, cd in [("📞 Телефон", "edit_info_phone"), ("📍 Манзил", "edit_info_address"), ("ℹ️ Биз ҳақида", "edit_info_about"), ("📢 ТГ Канал", "edit_soc_ch"), ("📸 Instagram", "edit_soc_ig"), ("💬 WhatsApp", "edit_soc_wa")]:
+        kb.button(text=txt, callback_data=cd)
     kb.adjust(2)
     await m.answer("Қайси маълумотни ўзгартирмоқчисиз?", reply_markup=kb.as_markup())
 
@@ -248,38 +310,35 @@ async def admin_edit_info_start(call: CallbackQuery, state: FSMContext):
 
 @dp.message(StateFilter(AdminState.info_phone, AdminState.info_address, AdminState.info_about, AdminState.soc_ch, AdminState.soc_ig, AdminState.soc_wa))
 async def admin_info_save_single(m: types.Message, state: FSMContext):
-    current_state = await state.get_state()
-    
-    # Eski ma'lumotlar o'chib ketmasligi uchun ularni bazadan tortib olamiz
+    st = await state.get_state()
     info = await get_combined_info()
-    address = info.get("address", "")
-    phone = info.get("phone", "")
-    about = info.get("about", "")
-    ch = info.get("telegram_channel", "")
-    ig = info.get("instagram", "")
-    wa = info.get("whatsapp", "")
-    
-    bot_info = await bot.get_me()
-    tg = f"https://t.me/{bot_info.username}"
+    address, phone, about = info.get("address", ""), info.get("phone", ""), info.get("about", "")
+    ch, ig, wa = info.get("telegram_channel", ""), info.get("instagram", ""), info.get("whatsapp", "")
+    tg = f"https://t.me/{(await bot.get_me()).username}"
 
-    # Qaysi tugma bosilgan bo'lsa, faqat o'shaning qiymatini yangilaymiz
-    if current_state == AdminState.info_phone.state: phone = m.text
-    elif current_state == AdminState.info_address.state: address = m.text
-    elif current_state == AdminState.info_about.state: about = m.text
-    elif current_state == AdminState.soc_ch.state: ch = m.text
-    elif current_state == AdminState.soc_ig.state: ig = m.text
-    elif current_state == AdminState.soc_wa.state: wa = m.text
+    if st == AdminState.info_phone.state: phone = m.text
+    elif st == AdminState.info_address.state: address = m.text
+    elif st == AdminState.info_about.state: about = m.text
+    elif st == AdminState.soc_ch.state: ch = m.text
+    elif st == AdminState.soc_ig.state: ig = m.text
+    elif st == AdminState.soc_wa.state: wa = m.text
 
-    # Yangilangan to'plamni bazaga qaytarib saqlaymiz
     await set_shop_info(address, phone, about)
     await set_social_links(tg, ig, wa, ch)
-    
-    await m.answer("✅ Маълумот муваффақиятли янгиланди!", reply_markup=main_kb(m.from_user.id))
+    await m.answer("✅ Маълумот янгиланди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
-# =====================================================================
-# MAHSULOT QO'SHISH, BUYURTMA, DO'KON... (QOLGAN HAMMASI)
-# =====================================================================
+@dp.message(F.text == "🖼 Логотип")
+async def admin_logo(m: types.Message, state: FSMContext):
+    if not is_admin(m.from_user.id): return
+    await m.answer("📸 Янги логотип учун расм юборинг:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(AdminState.logo_photo)
+
+@dp.message(AdminState.logo_photo, F.photo)
+async def admin_logo_save(m: types.Message, state: FSMContext):
+    await set_logo(m.photo[-1].file_id)
+    await m.answer("✅ Логотип янгиланди!", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
 
 @dp.message(F.text == "➕ Маҳсулот")
 async def admin_product_menu(m: types.Message):
@@ -300,9 +359,17 @@ async def admin_add_p_start(call: CallbackQuery, state: FSMContext):
 @dp.message(AdminState.category)
 async def admin_p_category(m: types.Message, state: FSMContext):
     await state.update_data(category=m.text)
-    await m.answer("📸 Маҳсулот расмини юборинг:")
+    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🚕 Такси"), KeyboardButton(text="🚛 Лабо")]], resize_keyboard=True)
+    await m.answer("Транспорт турини танланг:", reply_markup=kb)
+    await state.set_state(AdminState.delivery_size)
+
+@dp.message(AdminState.delivery_size)
+async def admin_p_delsize(m: types.Message, state: FSMContext):
+    if m.text not in ["🚕 Такси", "🚛 Лабо"]: return await m.answer("Тугмани босинг!")
+    await state.update_data(delivery_size=m.text)
+    await m.answer("📸 Маҳсулот расмини юборинг:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(AdminState.photo)
-    
+
 @dp.message(AdminState.photo, F.photo)
 async def admin_p_photo(m: types.Message, state: FSMContext):
     await state.update_data(file_id=m.photo[-1].file_id)
@@ -332,9 +399,44 @@ async def admin_p_desc(m: types.Message, state: FSMContext):
 async def admin_p_save(m: types.Message, state: FSMContext):
     if not m.text.isdigit(): return await m.answer("Рақам ёзинг!")
     d = await state.get_data()
-    # add_product ga d['category'] argumentini qo'shib yuborish
-    await add_product(d['name'], d['price'], int(m.text), d['file_id'], d['desc'], d['category'])
+    await add_product(d['name'], d['price'], int(m.text), d['file_id'], d['desc'], d['category'], d['delivery_size'])
     await m.answer("✅ Маҳсулот қўшилди!", reply_markup=main_kb(m.from_user.id))
+    await state.clear()
+
+@dp.callback_query(F.data == "dp_l")
+async def admin_dp_list(call: CallbackQuery):
+    items = await get_all_products()
+    kb = InlineKeyboardBuilder()
+    for i in items: kb.button(text=f"❌ {i['name']}", callback_data=f"dp_e_{i['_id']}")
+    kb.adjust(1)
+    await call.message.edit_text("Ўчириладиган маҳсулот:", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data.startswith("dp_e_"))
+async def admin_dp_exec(call: CallbackQuery):
+    await delete_product(call.data.split("_")[2])
+    await call.answer("Ўчирилди!")
+    await admin_dp_list(call)
+
+@dp.callback_query(F.data == "es_l")
+async def admin_es_list(call: CallbackQuery):
+    items = await get_all_products()
+    kb = InlineKeyboardBuilder()
+    for i in items: kb.button(text=f"{i['name']} ({i['stock']})", callback_data=f"es_v_{i['_id']}")
+    kb.adjust(1)
+    await call.message.edit_text("Танланг:", reply_markup=kb.as_markup())
+
+@dp.callback_query(F.data.startswith("es_v_"))
+async def admin_es_val(call: CallbackQuery, state: FSMContext):
+    await state.update_data(pid=call.data.split("_")[2])
+    await call.message.answer("Янги сонини ёзинг:")
+    await state.set_state(AdminState.edit_stock_qty)
+
+@dp.message(AdminState.edit_stock_qty)
+async def admin_es_save(m: types.Message, state: FSMContext):
+    if not m.text.isdigit(): return await m.answer("Рақам!")
+    d = await state.get_data()
+    await set_product_stock(d['pid'], int(m.text))
+    await m.answer("✅ Янгиланди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
 @dp.message(F.text == "📦 Буюртмалар")
@@ -363,7 +465,7 @@ async def admin_ord_back(call: CallbackQuery): await admin_orders(call.message)
 @dp.callback_query(F.data.startswith("dt_ord_"))
 async def admin_ord_detail(call: CallbackQuery):
     o = await get_order_by_id(call.data.split("_")[2])
-    txt = f"🆔 <b>Чек: #{o['order_id']}</b>\n👤 {o['user_name']}\n📞 {o['phone']}\n💰 {o['total_price']} сўм\n📊 Ҳолати: {o['status']}"
+    txt = f"🆔 <b>Чек: #{o['order_id']}</b>\n👤 {o['user_name']}\n📞 {o['phone']}\n💰 {o['total_price']} сом\n📊 Ҳолати: {o['status']}"
     kb = InlineKeyboardBuilder()
     for label, st in [("🔄 Ишда", "processing"), ("✅ Тайёр", "ready"), ("🚚 Йўлда", "shipped"), ("🏁 Ёпиш", "delivered"), ("❌ Рад этиш", "canceled")]:
         kb.button(text=label, callback_data=f"u_st_{o['order_id']}_{st}")
@@ -378,13 +480,21 @@ async def admin_ord_save_st(call: CallbackQuery):
     await call.answer("Янгиланди!")
     await admin_ord_detail(call)
 
+# =====================================================================
+# FOYDALANUVCHI: DO'KON VA SAVAT
+# =====================================================================
+
+@dp.message(F.text == "ℹ️ Биз ҳақимизда")
+async def about_handler(m: types.Message):
+    i = await get_shop_info()
+    await m.answer(f"📍 Манзил: {i['address']}\n📞 Тел: {i['phone']}\nℹ️ {i['about']}")
+
 @dp.message(F.text == "🛍 Дўкон")
 async def user_shop(m: types.Message):
     cats = await get_categories()
     if not cats: return await m.answer("Маҳсулот йўқ")
     kb = InlineKeyboardBuilder()
-    for c in cats:
-        kb.button(text=c, callback_data=f"cat_{c[:20]}") 
+    for c in cats: kb.button(text=c, callback_data=f"cat_{c[:20]}") 
     kb.adjust(2)
     await m.answer("📁 Категорияни танланг:", reply_markup=kb.as_markup())
 
@@ -398,35 +508,25 @@ async def user_shop_cat(call: CallbackQuery, state: FSMContext):
 async def user_shop_pg(call: CallbackQuery, state: FSMContext):
     d = await state.get_data()
     cat = d.get("current_cat")
-    if not cat: return await call.answer("Хатолик: Категория топилмади, қайта киринг", show_alert=True)
+    if not cat: return await call.answer("Хатолик: қайта киринг", show_alert=True)
     await user_shop_page(call, cat, int(call.data.split("_")[2]))
 
-# MANA SHU FUNKSIYA SENDA TUSHIB QOLGAN EDI:
 async def user_shop_page(m_or_call, cat, page):
     prods, total = await get_products_by_category_paginated(cat, page, 6)
     if not prods: 
-        return await (m_or_call.answer("Маҳсулот йўқ") if isinstance(m_or_call, types.Message) else m_or_call.answer("Бўш", show_alert=True))
-    
+        return await (m_or_call.answer("Бўш") if isinstance(m_or_call, types.Message) else m_or_call.answer("Бўш", show_alert=True))
     kb = InlineKeyboardBuilder()
-    for p in prods: 
-        kb.button(text=f"{p['name']}", callback_data=f"u_v_{p['_id']}")
+    for p in prods: kb.button(text=f"{p['name']}", callback_data=f"u_v_{p['_id']}")
     kb.adjust(2)
-    
     nav = []
     if page > 0: nav.append(InlineKeyboardButton(text="⬅️", callback_data=f"u_p_{page-1}"))
     if (page + 1) * 6 < total: nav.append(InlineKeyboardButton(text="➡️", callback_data=f"u_p_{page+1}"))
-    
-    # Katalogga qaytish tugmasi
     nav.append(InlineKeyboardButton(text="🔙 Каталог", callback_data="back_to_cats"))
     if nav: kb.row(*nav)
-    
     text = f"📁 Категория: <b>{cat}</b>\nМаҳсулотларимиз:"
-    if isinstance(m_or_call, types.Message): 
-        await m_or_call.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
-    else: 
-        await m_or_call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    if isinstance(m_or_call, types.Message): await m_or_call.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
+    else: await m_or_call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
-# KATALOGGA QAYTISH HANDLERI HAM TUSHIB QOLGAN EDI:
 @dp.callback_query(F.data == "back_to_cats")
 async def back_to_categories(call: CallbackQuery):
     await user_shop(call.message)
@@ -435,14 +535,12 @@ async def back_to_categories(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("u_v_"))
 async def user_p_view(call: CallbackQuery):
     p = await get_product(call.data.split("_")[2])
-    cap = f"📱 <b>{p['name']}</b>\n💰 {p['price']} сўм\n📝 {p['description']}\n📦 Омборда: {p['stock']}"
+    cap = f"📱 <b>{p['name']}</b>\n💰 {p['price']} сом\n📝 {p['description']}\n📦 Омборда: {p['stock']}"
     kb = InlineKeyboardBuilder()
     kb.button(text="🛒 Саватга қўшиш", callback_data=f"u_a_{p['_id']}")
     kb.button(text="🔙 Орқага", callback_data="u_p_0")
-    try: 
-        await call.message.answer_photo(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
-    except: 
-        await call.message.answer_document(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
+    try: await call.message.answer_photo(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
+    except: await call.message.answer_document(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
     await call.message.delete()
 
 @dp.callback_query(F.data.startswith("u_a_"))
@@ -460,8 +558,11 @@ async def user_cart_save(m: types.Message, state: FSMContext):
     if qty > p['stock']: return await m.answer(f"Кечирасиз, фақат {p['stock']} та бор.")
     cart = d.get("cart", {})
     pid = str(p['_id'])
+    
+    del_size = p.get('delivery_size', '🚕 Такси') 
     if pid in cart: cart[pid]['qty'] += qty
-    else: cart[pid] = {'name': p['name'], 'price': p['price'], 'qty': qty}
+    else: cart[pid] = {'name': p['name'], 'price': p['price'], 'qty': qty, 'delivery_size': del_size}
+    
     await state.update_data(cart=cart)
     await m.answer("✅ Саватга қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.set_state(None)
@@ -473,8 +574,8 @@ async def user_cart_show(m: types.Message, state: FSMContext):
     if not cart: return await m.answer("Саватингиз бўш.")
     txt = "🛒 Саватдагилар:\n"
     total = sum(i['price'] * i['qty'] for i in cart.values())
-    for i in cart.values(): txt += f"- {i['name']} x {i['qty']} = {i['price']*i['qty']} сўм\n"
-    txt += f"\n💰 Жами: {total} сўм"
+    for i in cart.values(): txt += f"- {i['name']} x {i['qty']} = {i['price']*i['qty']} сом\n"
+    txt += f"\n💰 Жами: {total} сом"
     kb = InlineKeyboardBuilder()
     kb.button(text="🏁 Буюртма бериш", callback_data="u_checkout")
     kb.button(text="🗑 Тозалаш", callback_data="u_clear")
@@ -485,225 +586,220 @@ async def user_cart_clr(call: CallbackQuery, state: FSMContext):
     await state.update_data(cart={})
     await call.message.edit_text("Сават тозаланди.")
 
+# =====================================================================
+# CHECKOUT MANTIQI (3 TIL, 20% CHEGIRMA, 10% ZAKALAT, MULTI-BASE)
+# =====================================================================
+
 @dp.callback_query(F.data == "u_checkout")
 async def user_checkout_start(call: CallbackQuery, state: FSMContext):
-    # 1. Eng birinchi yetkazish usuli so'raladi
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="🚕 Етказиб бериш (Такси)"), KeyboardButton(text="🚶‍♂️ Ўзим олиб кетаман")],
-        [KeyboardButton(text="❌ Бекор қилиш")]
-    ], resize_keyboard=True)
-    await call.message.answer("Етказиб бериш усулини танланг:", reply_markup=kb)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🇺🇿 Ўзбекча", callback_data="lang_uz")
+    kb.button(text="🇷🇺 Русский", callback_data="lang_ru")
+    kb.button(text="🇰🇬 Кыргызча", callback_data="lang_kg")
+    await call.message.answer("Буюртмани расмийлаштириш учун тилни танланг:\nВыберите язык:\nТилди тандаңыз:", reply_markup=kb.as_markup())
+    await call.message.delete()
+
+@dp.callback_query(F.data.startswith("lang_"))
+async def set_user_language(call: CallbackQuery, state: FSMContext):
+    lang = call.data.split("_")[1]
+    await state.update_data(lang=lang)
+    
+    texts = {
+        "uz": ["🚚 Етказиб бериш", "🚶‍♂️ Ўзим олиб кетаман", "❌ Бекор қилиш", "Қабул қилиш усулини танланг:"],
+        "ru": ["🚚 Доставка", "🚶‍♂️ Самовывоз", "❌ Отмена", "Выберите способ получения:"],
+        "kg": ["🚚 Жеткирүү", "🚶‍♂️ Өзүм алып кетем", "❌ Жокко чыгаруу", "Алуу ыкмасын тандаңыз:"]
+    }
+    t = texts[lang]
+    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=t[0]), KeyboardButton(text=t[1])], [KeyboardButton(text=t[2])]], resize_keyboard=True)
+    await call.message.answer(t[3], reply_markup=kb)
     await state.set_state(UserState.delivery_type)
     await call.message.delete()
 
-@dp.message(F.text == "❌ Бекор қилиш")
-async def cancel_checkout(m: types.Message, state: FSMContext):
-    # Xaridor xohlagan payti otmen qilishi mumkin
-    await state.set_state(None)
-    await m.answer("Буюртма бекор қилинди.", reply_markup=main_kb(m.from_user.id))
-
 @dp.message(UserState.delivery_type)
 async def user_delivery_get(m: types.Message, state: FSMContext):
-    # 2. Xaridor tugmani bosgach, nima bosganini tekshiramiz
-    if m.text not in ["🚕 Етказиб бериш (Такси)", "🚶‍♂️ Ўзим олиб кетаман"]:
-        return await m.answer("Илтимос, пастдаги тугмалардан бирини танланг!")
-    
-    await state.update_data(delivery_type=m.text) # Xotiraga saqladik
-    
-    # Agar taksi desa, lokatsiya so'raymiz
-    if m.text == "🚕 Етказиб бериш (Такси)":
-        kb = ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="📍 Локация юбориш", request_location=True)], 
-            [KeyboardButton(text="❌ Бекор қилиш")]
-        ], resize_keyboard=True)
-        await m.answer("Манзилингизни (Локация) юборинг ёки матн кўринишида ёзинг:", reply_markup=kb)
+    d = await state.get_data()
+    lang = d.get('lang', 'uz')
+
+    cancel_btns = ["❌ Бекор қилиш", "❌ Отмена", "❌ Жокко чыгаруу"]
+    delivery_btns = ["🚚 Етказиб бериш", "🚚 Доставка", "🚚 Жеткирүү"]
+    pickup_btns = ["🚶‍♂️ Ўзим олиб кетаман", "🚶‍♂️ Самовывоз", "🚶‍♂️ Өзүм алып кетем"]
+
+    if m.text in cancel_btns:
+        await state.set_state(None)
+        return await m.answer("Бекор қилинди / Отменено / Жокко чыгарылды.", reply_markup=main_kb(m.from_user.id))
+
+    if m.text in delivery_btns:
+        await state.update_data(delivery_type="Етказиб бериш")
+        prompt = {
+            "uz": "📍 Йўл кирани ҳисоблаш учун юк БОРАДИГАН манзил локациясини юборинг:",
+            "ru": "📍 Отправьте локацию КУДА нужно доставить груз:",
+            "kg": "📍 Жол кирени эсептөө үчүн жүк БАРА ТУРГАН даректин локациясын жөнөтүңүз:"
+        }[lang]
+        loc_btn = {"uz":"📍 Локация юбориш","ru":"📍 Отправить локацию","kg":"📍 Локация жөнөтүү"}[lang]
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=loc_btn, request_location=True)], [KeyboardButton(text=cancel_btns[0])]], resize_keyboard=True)
+        await m.answer(prompt, reply_markup=kb)
         await state.set_state(UserState.location)
-    # Agar o'zim olib ketaman desa, manzil kerak emas, to'g'ridan-to'g'ri nomer so'raymiz
-    else:
-        await state.update_data(location="Дўкондан олиб кетиш")
-        kb = ReplyKeyboardMarkup(keyboard=[
-            [KeyboardButton(text="📱 Рақамни юбориш", request_contact=True)], 
-            [KeyboardButton(text="❌ Бекор қилиш")]
-        ], resize_keyboard=True)
-        await m.answer("Телефон рақамингизни юборинг ёки ёзинг:", reply_markup=kb)
+
+    elif m.text in pickup_btns:
+        await state.update_data(delivery_type="Ўзи олиб кетади")
+        prompt = {
+            "uz": "Вақтингиз ва пулингизни тежанг! Локациянгизни ташланг, балки биз олиб борганимиз ўзингиз келганингиздан арзонроқ тушар? Етказиб беришга 20% чегирмамиз бор! 👇",
+            "ru": "Сэкономьте время и деньги! Скиньте локацию, возможно наша доставка со скидкой 20% выйдет дешевле! 👇",
+            "kg": "Убактыңызды жана акчаңызды үнөмдөңүз! Локацияңызды таштаңыз, балким биздин 20% арзандатуу менен жеткирүүбүз арзаныраак түшөр! 👇"
+        }[lang]
+        btn_no = {"uz":"Йўқ, ўзим бораман","ru":"Нет, приеду сам","kg":"Жок, өзүм барам"}[lang]
+        loc_btn = {"uz":"📍 Локация юбориш","ru":"📍 Отправить локацию","kg":"📍 Локация жөнөтүү"}[lang]
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=loc_btn, request_location=True)], [KeyboardButton(text=btn_no)]], resize_keyboard=True)
+        await m.answer(prompt, reply_markup=kb)
+        await state.set_state(UserState.upsell_loc)
+
+@dp.message(UserState.upsell_loc)
+async def handle_upsell(m: types.Message, state: FSMContext):
+    d = await state.get_data()
+    lang = d.get('lang', 'uz')
+    no_btns = ["Йўқ, ўзим бораман", "Нет, приеду сам", "Жок, өзүм барам"]
+
+    if m.text in no_btns:
+        await state.update_data(location="Базадан олиб кетади", delivery_price=0, distance=0)
+        prompt = {"uz":"Рақамингизни юборинг:","ru":"Отправьте ваш номер:","kg":"Номериңизди жөнөтүңүз:"}[lang]
+        kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text={"uz":"📱 Рақам","ru":"📱 Номер","kg":"📱 Номер"}[lang], request_contact=True)]], resize_keyboard=True)
+        await m.answer(prompt, reply_markup=kb)
         await state.set_state(UserState.phone)
+        return
+
+    if m.location:
+        await state.update_data(delivery_type="Етказиб бериш")
+        await user_location_get(m, state)
 
 @dp.message(UserState.location)
 async def user_location_get(m: types.Message, state: FSMContext):
-    # 3. Lokatsiya kelgach, uni saqlab, endi telefon nomer so'raymiz
-    loc = f"{m.location.latitude},{m.location.longitude}" if m.location else m.text
-    await state.update_data(location=loc)
-    
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="📱 Рақамни юбориш", request_contact=True)], 
-        [KeyboardButton(text="❌ Бекор қилиш")]
-    ], resize_keyboard=True)
-    await m.answer("Телефон рақамингизни юборинг ёки ёзинг:", reply_markup=kb)
+    d = await state.get_data()
+    lang = d.get('lang', 'uz')
+    cart = d.get("cart", {})
+    cart_total = sum(i['price'] * i['qty'] for i in cart.values())
+
+    vehicle = "🚕 Такси"
+    for item in cart.values():
+        if item.get("delivery_size") == "🚛 Лабо":
+            vehicle = "🚛 Лабо/Портер"
+            break
+
+    await state.update_data(vehicle_type=vehicle)
+
+    if not m.location:
+        return await m.answer({"uz":"Илтимос, харитадан локация юборинг.","ru":"Пожалуйста, отправьте локацию.","kg":"Сураныч, локация жөнөтүңүз."}[lang])
+
+    bases = await get_all_bases()
+    if not bases:
+        return await m.answer({"uz":"❌ Тизимда ҳеч қандай база киритилмаган. Админга хабар беринг.","ru":"❌ В системе нет баз. Сообщите админу.","kg":"❌ Базалар киргизилген эмес. Админге билдириңиз."}[lang])
+
+    min_dist = float('inf')
+    closest_base = "Номаълум"
+    for base in bases:
+        dist = calculate_distance(base['lat'], base['lon'], m.location.latitude, m.location.longitude)
+        if dist < min_dist:
+            min_dist = dist
+            closest_base = base['name']
+
+    distance_km = min_dist
+
+    if distance_km > 50:
+        return await m.answer({"uz":"❌ 50 км дан узоққа элтиб бермаймиз. Ёки сизга яқин база йўқ.","ru":"❌ Доставка только до 50 км от ближайшей базы.","kg":"❌ Эң жакын базадан 50 кмге чейин гана жеткиребиз."}[lang])
+
+    base_price = 0
+    if vehicle == "🚕 Такси":
+        if distance_km > 30:
+            return await m.answer({"uz":"❌ Такси фақат 30 км гача.","ru":"❌ Такси только до 30 км.","kg":"❌ Такси 30 кмге чейин."}[lang])
+        if cart_total > 50000: base_price = max(0, distance_km - 10) * 200
+        else: base_price = distance_km * 200
+    else:
+        base_price = 500 + (distance_km * 2 * 50)
+
+    base_price = round(base_price, -1)
+    discounted_price = round(base_price * 0.8, -1) 
+
+    await state.update_data(location=f"{m.location.latitude},{m.location.longitude}", delivery_price=discounted_price, distance=round(distance_km, 1), closest_base=closest_base)
+
+    time_text = get_delivery_time(lang)
+
+    info = {
+        "uz": f"⏱ Етказиш вақти: <b>{time_text}</b>\n🏢 Сизга энг яқин омбор: <b>{closest_base}</b>\n🚙 Транспорт: <b>{vehicle}</b>\n📏 Масофа: <b>{round(distance_km,1)} км</b>\n💸 Йўл кира: ~{base_price}~ эмас, 20% чегирма билан <b>{int(discounted_price)} сом</b>!\n\nТелефон рақамингизни юборинг:",
+        "ru": f"⏱ Время: <b>{time_text}</b>\n🏢 Ближайший склад: <b>{closest_base}</b>\n🚙 Авто: <b>{vehicle}</b>\n📏 Дистанция: <b>{round(distance_km,1)} км</b>\n💸 Доставка: вместо ~{base_price}~ со скидкой 20% <b>{int(discounted_price)} сом</b>!\n\nОтправьте номер:",
+        "kg": f"⏱ Жеткирүү убактысы: <b>{time_text}</b>\n🏢 Эң жакын кампа: <b>{closest_base}</b>\n🚙 Унаа: <b>{vehicle}</b>\n📏 Аралык: <b>{round(distance_km,1)} км</b>\n💸 Жол кире: ~{base_price}~ эмес, 20% арзандатуу менен <b>{int(discounted_price)} сом</b>!\n\nНомериңизди жөнөтүңүз:"
+    }[lang]
+
+    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text={"uz":"📱 Рақам","ru":"📱 Номер","kg":"📱 Номер"}[lang], request_contact=True)]], resize_keyboard=True)
+    await m.answer(info, parse_mode="HTML", reply_markup=kb)
     await state.set_state(UserState.phone)
 
 @dp.message(UserState.phone)
 async def user_phone_get(m: types.Message, state: FSMContext):
-    # 4. Telefon kelgach, endi to'lov usulini so'raymiz
     phone = m.contact.phone_number if m.contact else m.text
     await state.update_data(phone=phone)
-    
-    kb = ReplyKeyboardMarkup(keyboard=[
-        [KeyboardButton(text="💵 Нақд пул"), KeyboardButton(text="💳 Пластик карта")],
-        [KeyboardButton(text="❌ Бекор қилиш")]
-    ], resize_keyboard=True)
-    await m.answer("Тўлов усулини танланг:", reply_markup=kb)
-    await state.set_state(UserState.pay_method)
+    d = await state.get_data()
+    lang = d.get('lang', 'uz')
 
-@dp.message(UserState.pay_method)
-async def user_pay_method_get(m: types.Message, state: FSMContext):
-    # 5. To'lov usuli tanlangach...
-    if m.text not in ["💵 Нақд пул", "💳 Пластик карта"]:
-        return await m.answer("Илтимос, тугмалардан бирини танланг!")
-        
-    await state.update_data(pay_method=m.text)
-    
-    # Agar Karta tanlasa, karta raqamini berib rasmini so'raymiz
-    if m.text == "💳 Пластик карта":
-        await m.answer(f"Тўловни қуйидаги картага амалга оширинг:\n\n💳 <b>{CARD_NUMBER}</b>\n\nТўлов қилгач, скриншот (чек) ни шу ерга юборинг:", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-        await state.set_state(UserState.check_photo)
-    # Agar naqd bo'lsa, rasmni kutmasdan buyurtmani yopamiz
-    else:
-        await finish_order(m, state)
+    cart_total = sum(i['price'] * i['qty'] for i in d.get("cart", {}).values())
+    delivery_price = d.get('delivery_price', 0)
+    final_total = cart_total + delivery_price
+
+    advance = round(final_total * 0.1, -1)
+    remaining = final_total - advance
+
+    msg = {
+        "uz": f"💳 <b>10% Олдиндан Тўлов (Закалат)</b>\n\n📦 Маҳсулотлар: {cart_total} сом\n🚕 Йўл кира: {delivery_price} сом\n💰 ЖАМИ: <b>{int(final_total)} сом</b>\n\nТасдиқлаш учун 10% закалат: <b>{int(advance)} сом</b> тўланг.\n\n💳 Карта: <b>{CARD_NUMBER}</b>\n\n<i>Қолган {int(remaining)} сом юк етиб боргач ҳайдовчига тўланади.</i>\n\n📸 Тўлов чекини (расм) шу ерга юборинг:",
+        "ru": f"💳 <b>Предоплата 10%</b>\n\n📦 Товары: {cart_total} сом\n🚕 Доставка: {delivery_price} сом\n💰 ИТОГО: <b>{int(final_total)} сом</b>\n\nДля подтверждения оплатите 10%: <b>{int(advance)} сом</b>.\n\n💳 Карта: <b>{CARD_NUMBER}</b>\n\n<i>Остаток {int(remaining)} сом оплачивается водителю при получении.</i>\n\n📸 Отправьте фото чека:",
+        "kg": f"💳 <b>10% Алдын ала төлөө</b>\n\n📦 Товарлар: {cart_total} сом\n🚕 Жол кире: {delivery_price} сом\n💰 БААРДЫГЫ: <b>{int(final_total)} сом</b>\n\nТастыктоо үчүн 10% төлөңүз: <b>{int(advance)} сом</b>.\n\n💳 Карта: <b>{CARD_NUMBER}</b>\n\n<i>Калган {int(remaining)} сом жүк келгенде айдоочуга төлөнөт.</i>\n\n📸 Чектин сүрөтүн жөнөтүңүз:"
+    }[lang]
+
+    await m.answer(msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(UserState.check_photo)
 
 @dp.message(UserState.check_photo, F.photo)
-async def user_check_get(m: types.Message, state: FSMContext):
-    # 6. Rasm kelgach, uni xotiraga olib buyurtmani yopamiz
-    await state.update_data(check_file_id=m.photo[-1].file_id)
-    await finish_order(m, state)
-    
-@dp.message(UserState.check_photo)
-async def user_check_invalid(m: types.Message):
-    # Agar rasm o'rniga yozuv tashlasa so'kish
-    await m.answer("Илтимос, тўлов чекини фақат расм (скриншот) кўринишида юборинг!")
-
 async def finish_order(m: types.Message, state: FSMContext):
-    # 7. Final. Xotiradagi barcha ma'lumotlarni yig'amiz
     d = await state.get_data()
+    lang = d.get('lang', 'uz')
+    
+    check_file_id = m.photo[-1].file_id
     cart = d.get("cart", {})
-    total = sum(i['price'] * i['qty'] for i in cart.values())
+    cart_total = sum(i['price'] * i['qty'] for i in cart.values())
+    delivery_price = d.get('delivery_price', 0)
+    final_total = cart_total + delivery_price
+    advance = round(final_total * 0.1, -1)
     
-    delivery = d.get('delivery_type', 'Noma\'lum')
-    location = d.get('location', 'Noma\'lum')
-    phone = d.get('phone', 'Noma\'lum')
-    pay = d.get('pay_method', 'Noma\'lum')
-    check = d.get('check_file_id', 'Йўқ')
+    delivery = d.get('delivery_type', 'Номаълум')
+    vehicle = d.get('vehicle_type', 'Йўқ')
+    location = d.get('location', 'Номаълум')
+    closest_base = d.get('closest_base', 'Номаълум')
+    phone = d.get('phone', 'Номаълум')
     
-    # Bazaga yozamiz. Chek rasmini ID sini comment ustuniga tiqib yubordim.
-    oid = await create_order(m.from_user.id, m.from_user.full_name, phone, cart, total, pay, delivery, location, f"Чек ID: {check}")
+    oid = await create_order(m.from_user.id, m.from_user.full_name, phone, cart, final_total, "Карта орқали 10%", delivery, location, f"Тўланди: {advance} сом | Йўл: {delivery_price} | База: {closest_base} | Чек: {check_file_id}")
     
-    # Ombordan mahsulotlarni ayiramiz
     for pid, i in cart.items(): await decrease_stock(pid, i['qty'])
     
-    await m.answer(f"✅ Буюртма қабул қилинди! Чек ID: #{oid}\nТез орада алоқага чиқамиз.", reply_markup=main_kb(m.from_user.id))
+    success_msg = {
+        "uz": f"✅ Буюртма тасдиқланди! Чек ID: #{oid}\n{get_delivery_time('uz')} кутинг.",
+        "ru": f"✅ Заказ подтвержден! ID чека: #{oid}\nОжидайте {get_delivery_time('ru')}.",
+        "kg": f"✅ Буйрутма тастыкталды! Чек ID: #{oid}\n{get_delivery_time('kg')} күтүңүз."
+    }[lang]
+    await m.answer(success_msg, reply_markup=main_kb(m.from_user.id))
     
-    # Adminga boradigan xabarni tayyorlaymiz
-    admin_text = f"🚨 <b>ЯНГИ БУЮРТМА: #{oid}</b>\n👤 Исм: {m.from_user.full_name}\n📞 Тел: {phone}\n🚕 Усул: {delivery}\n📍 Манзил: {location}\n💵 Тўлов: {pay}\n💰 Сумма: {total} сўм"
+    admin_text = f"🚨 <b>ЯНГИ БУЮРТМА: #{oid}</b>\n👤 Исм: {m.from_user.full_name}\n📞 Тел: {phone}\n🚚 Етказиш: {delivery} ({vehicle})\n🏢 База: {closest_base}\n📍 Манзил: {location}\n💰 ЖАМИ Сумма: {final_total} сом\n💵 Олдиндан тўланди (10%): {advance} сом\n📦 Қолдиқ (Ҳайдовчи олади): {final_total - advance} сом"
     
     for a in ADMIN_IDS:
-        # Agar karta orqali to'lagan bo'lsa adminga rasmi bilan boradi
-        if check != 'Йўқ':
-            await bot.send_photo(a, photo=check, caption=admin_text, parse_mode="HTML")
-        # Agar naqd bo'lsa oddiy xabar
-        else:
-            await bot.send_message(a, admin_text, parse_mode="HTML")
-            # Agar haqiqiy lokatsiya tashlagan bo'lsa, xaritadagi nuqtani ham adminga alohida tashlaymiz
-            if location != "Дўкондан олиб кетиш" and "," in location:
-                try:
-                    lat, lon = location.split(",")
-                    await bot.send_location(a, latitude=float(lat), longitude=float(lon))
-                except: pass
+        await bot.send_photo(a, photo=check_file_id, caption=admin_text, parse_mode="HTML")
+        if location != "Базадан олиб кетади" and "," in location:
+            try:
+                lat, lon = location.split(",")
+                await bot.send_location(a, latitude=float(lat), longitude=float(lon))
+            except: pass
             
-    # Savatni va xotirani tozalash
     await state.update_data(cart={})
     await state.set_state(None)
 
-@dp.message(F.text == "🗑 Маълуmot ўчириш")
-async def admin_delete_menu(m: types.Message):
-    if not is_admin(m.from_user.id): return
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🛠 Хизмат", callback_data="dl_srv")
-    kb.button(text="📍 Филиал", callback_data="dl_loc")
-    kb.button(text="🔥 Аксия", callback_data="dl_ad")
-    kb.adjust(1)
-    await m.answer("Нимани ўчирмоқчисиз?", reply_markup=kb.as_markup())
-
-@dp.callback_query(F.data.startswith("dl_"))
-async def admin_del_list(call: CallbackQuery):
-    t = call.data.split("_")[1]
-    kb = InlineKeyboardBuilder()
-    if t == "srv":
-        items = await get_all_services()
-        for i in items: kb.button(text=f"❌ {i['name']}", callback_data=f"ex_dsrv_{i['_id']}")
-    elif t == "loc":
-        items = await get_all_locations()
-        for i in items: kb.button(text=f"❌ {i['name']}", callback_data=f"ex_dloc_{i['_id']}")
-    elif t == "ad":
-        items = await get_all_ads()
-        for i in items: kb.button(text=f"❌ {i['title']}", callback_data=f"ex_dad_{i['_id']}")
-    kb.adjust(1)
-    await call.message.edit_text("Танланг:", reply_markup=kb.as_markup())
-
-@dp.callback_query(F.data.startswith("ex_d"))
-async def admin_del_exec(call: CallbackQuery):
-    parts = call.data.split("_")
-    p = parts[1]    # 'dsrv', 'dloc' yoki 'dad'
-    oid = parts[2]  # Bazadagi haqiqiy ID
-    
-    if p == "dsrv": 
-        await delete_service(oid)
-    elif p == "dloc": 
-        await delete_location(oid)
-    elif p == "dad": 
-        await delete_ad(oid)
-        
-    await call.answer("✅ Муваффақиятли ўчирилди!")
-    await call.message.delete()
-
-@dp.callback_query(F.data == "es_l")
-async def admin_es_list(call: CallbackQuery):
-    items = await get_all_products()
-    kb = InlineKeyboardBuilder()
-    for i in items: kb.button(text=f"{i['name']} ({i['stock']})", callback_data=f"es_v_{i['_id']}")
-    kb.adjust(1)
-    await call.message.edit_text("Танланг:", reply_markup=kb.as_markup())
-
-@dp.callback_query(F.data.startswith("es_v_"))
-async def admin_es_val(call: CallbackQuery, state: FSMContext):
-    await state.update_data(pid=call.data.split("_")[2])
-    await call.message.answer("Янги сонини ёзинг:")
-    await state.set_state(AdminState.edit_stock_qty)
-
-@dp.message(AdminState.edit_stock_qty)
-async def admin_es_save(m: types.Message, state: FSMContext):
-    if not m.text.isdigit(): return await m.answer("Рақам!")
-    d = await state.get_data()
-    await set_product_stock(d['pid'], int(m.text))
-    await m.answer("✅ Янгиланди!", reply_markup=main_kb(m.from_user.id))
-    await state.clear()
-
-@dp.callback_query(F.data == "dp_l")
-async def admin_dp_list(call: CallbackQuery):
-    items = await get_all_products()
-    kb = InlineKeyboardBuilder()
-    for i in items: kb.button(text=f"❌ {i['name']}", callback_data=f"dp_e_{i['_id']}")
-    kb.adjust(1)
-    await call.message.edit_text("Ўчириладиган маҳсулот:", reply_markup=kb.as_markup())
-
-@dp.callback_query(F.data.startswith("dp_e_"))
-async def admin_dp_exec(call: CallbackQuery):
-    await delete_product(call.data.split("_")[2])
-    await call.answer("Ўчирилди!")
-    await admin_dp_list(call)
-
-@dp.message(F.text == "ℹ️ Биз ҳақимизда")
-async def about_handler(m: types.Message):
-    i = await get_shop_info()
-    await m.answer(f"📍 Манзил: {i['address']}\n📞 Тел: {i['phone']}\nℹ️ {i['about']}")
+@dp.message(UserState.check_photo)
+async def user_check_invalid(m: types.Message):
+    await m.answer("Илтимос, тўлов чекини фақат расм (скриншот) кўринишида юборинг!")
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
