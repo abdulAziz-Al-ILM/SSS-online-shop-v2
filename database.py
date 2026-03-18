@@ -34,8 +34,8 @@ except Exception as e:
 # 1. MAHSULOTLAR (PRODUCTS) MANTIQI
 # =====================================================================
 
-async def add_product(name, price, stock, file_id, description):
-    """Yangi mahsulotni bazaga barcha detallari bilan qo'shish"""
+# add_product funksiyasini quyidagiga almashtir:
+async def add_product(name, price, stock, file_id, description, category):
     try:
         doc = {
             "name": name,
@@ -43,6 +43,7 @@ async def add_product(name, price, stock, file_id, description):
             "stock": int(stock),
             "file_id": file_id,
             "description": description,
+            "category": category, # YANNGI QATOR
             "created_at": time.time()
         }
         result = await products_col.insert_one(doc)
@@ -51,13 +52,23 @@ async def add_product(name, price, stock, file_id, description):
         logger.error(f"add_product xatosi: {e}")
         return None
 
-async def get_products_paginated(page=0, page_size=6):
-    """Mijozlar uchun mahsulotlarni sahifalab chiqarish"""
+# Ushbu ikkita yangi funksiyani faylga qo'sh:
+async def get_categories():
+    """Barcha mavjud kategoriyalarni olish"""
+    try:
+        return await products_col.distinct("category", {"stock": {"$gt": 0}})
+    except Exception as e:
+        logger.error(f"get_categories xatosi: {e}")
+        return []
+
+async def get_products_by_category_paginated(category, page=0, page_size=6):
+    """Kategoriya bo'yicha mahsulotlarni sahifalab chiqarish"""
     try:
         skip = page * page_size
-        cursor = products_col.find({"stock": {"$gt": 0}}).sort("created_at", -1).skip(skip).limit(page_size)
+        query = {"stock": {"$gt": 0}, "category": category}
+        cursor = products_col.find(query).sort("created_at", -1).skip(skip).limit(page_size)
         products = await cursor.to_list(length=page_size)
-        total_count = await products_col.count_documents({"stock": {"$gt": 0}})
+        total_count = await products_col.count_documents(query)
         return products, total_count
     except Exception as e:
         logger.error(f"Pagination xatosi: {e}")
