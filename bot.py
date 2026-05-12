@@ -4,7 +4,7 @@ import sys
 import math
 import pytz
 from datetime import datetime
-from aiogram import Bot, Dispatcher, F, types
+from aiogram import Bot, Dispatcher, F, types, BaseMiddleware
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -40,6 +40,42 @@ def get_delivery_time(lang):
         return {"uz": "бугун тушдан кейин", "ru": "сегодня после обеда", "kg": "бүгүн түштөн кийин"}.get(lang, "бугун тушдан кейин")
     else:
         return {"uz": "эртага тушгача", "ru": "завтра до обеда", "kg": "эртең түшкө чейин"}.get(lang, "эртага тушгача")
+
+# =====================================================================
+# TEXNIK XIZMAT (MAINTENANCE) MIDDLEWARE
+# =====================================================================
+class MaintenanceMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user_id = None
+        if isinstance(event, (types.Message, types.CallbackQuery)):
+            user_id = event.from_user.id
+            
+        # Agar foydalanuvchi admin bo'lsa, bot kodlari odatdagidek ishlaydi
+        if user_id and user_id in ADMIN_IDS:
+            return await handler(event, data)
+        
+        # Agar oddiy foydalanuvchi bo'lsa, 3 tilda xabar beriladi
+        msg_text = (
+            "🇺🇿 <b>Ҳурматли фойдаланувчи!</b>\n"
+            "Тизимни янада қулайроқ қилиш мақсадида ботда техник ишлар олиб борилмоқда. Тез орада қайта ишга тушамиз. Тушунганингиз учун раҳмат!\n\n"
+            "🇷🇺 <b>Уважаемый пользователь!</b>\n"
+            "В настоящее время проводятся технические работы по улучшению системы. Мы скоро вернемся. Спасибо за понимание!\n\n"
+            "🇰🇬 <b>Урматтуу колдонуучу!</b>\n"
+            "Системаны жакшыртуу максатында ботто техникалык иштер жүрүп жатат. Жакында кайтып келебиз. Түшүнгөнүңүз үчүн рахмат!"
+        )
+        
+        if isinstance(event, types.Message):
+            await event.answer(msg_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+        elif isinstance(event, types.CallbackQuery):
+            await event.message.answer(msg_text, parse_mode="HTML")
+            await event.answer()
+        
+        # Kod shu yerda to'xtaydi, asosiy handlerlarga o'tmaydi
+        return
+
+# Middleware ni dispetcherga ulaymiz
+dp.message.middleware(MaintenanceMiddleware())
+dp.callback_query.middleware(MaintenanceMiddleware())
 
 # =====================================================================
 # STATES (HOLATLAR)
