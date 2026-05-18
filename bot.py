@@ -50,11 +50,9 @@ class MaintenanceMiddleware(BaseMiddleware):
         if isinstance(event, (types.Message, types.CallbackQuery)):
             user_id = event.from_user.id
             
-        # Agar foydalanuvchi admin bo'lsa, bot kodlari odatdagidek ishlaydi
         if user_id and user_id in ADMIN_IDS:
             return await handler(event, data)
         
-        # Agar oddiy foydalanuvchi bo'lsa, 3 tilda xabar beriladi
         msg_text = (
             "🇺🇿 <b>Ҳурматли фойдаланувчи!</b>\n"
             "Тизимни янада қулайроқ қилиш мақсадида ботда техник ишлар олиб борилмоқда. Тез орада қайта ишга тушамиз. Тушунганингиз учун раҳмат!\n\n"
@@ -70,10 +68,8 @@ class MaintenanceMiddleware(BaseMiddleware):
             await event.message.answer(msg_text, parse_mode="HTML")
             await event.answer()
         
-        # Kod shu yerda to'xtaydi, asosiy handlerlarga o'tmaydi
         return
 
-# Middleware ni dispetcherga ulaymiz
 dp.message.middleware(MaintenanceMiddleware())
 dp.callback_query.middleware(MaintenanceMiddleware())
 
@@ -83,12 +79,10 @@ dp.callback_query.middleware(MaintenanceMiddleware())
 
 class AdminState(StatesGroup):
     category = State()
-    delivery_size = State()
     photo = State()
     name = State()
+    article = State()
     price = State()
-    desc = State()
-    stock = State()
     srv_name = State()
     srv_desc = State()
     loc_name = State()
@@ -284,7 +278,6 @@ async def admin_ad_save(m: types.Message, state: FSMContext):
     await m.answer("✅ Аксия қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
-# --- O'CHIRISH IJROSI (HAMMASI SHU YERDA) ---
 @dp.callback_query(F.data.startswith("dl_"))
 async def admin_del_list(call: CallbackQuery):
     t = call.data.split("_")[1]
@@ -395,14 +388,6 @@ async def admin_add_p_start(call: CallbackQuery, state: FSMContext):
 @dp.message(AdminState.category)
 async def admin_p_category(m: types.Message, state: FSMContext):
     await state.update_data(category=m.text)
-    kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🚕 Такси"), KeyboardButton(text="🚛 Лабо")]], resize_keyboard=True)
-    await m.answer("Транспорт турини танланг:", reply_markup=kb)
-    await state.set_state(AdminState.delivery_size)
-
-@dp.message(AdminState.delivery_size)
-async def admin_p_delsize(m: types.Message, state: FSMContext):
-    if m.text not in ["🚕 Такси", "🚛 Лабо"]: return await m.answer("Тугмани босинг!")
-    await state.update_data(delivery_size=m.text)
     await m.answer("📸 Маҳсулот расмини юборинг:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(AdminState.photo)
 
@@ -415,27 +400,20 @@ async def admin_p_photo(m: types.Message, state: FSMContext):
 @dp.message(AdminState.name)
 async def admin_p_name(m: types.Message, state: FSMContext):
     await state.update_data(name=m.text)
+    await m.answer("Артикул:")
+    await state.set_state(AdminState.article)
+
+@dp.message(AdminState.article)
+async def admin_p_article(m: types.Message, state: FSMContext):
+    await state.update_data(article=m.text)
     await m.answer("Нархи (фақат рақам):")
     await state.set_state(AdminState.price)
 
 @dp.message(AdminState.price)
-async def admin_p_price(m: types.Message, state: FSMContext):
-    if not m.text.isdigit(): return await m.answer("Рақам ёзинг!")
-    await state.update_data(price=int(m.text))
-    await m.answer("Тавсифи:")
-    await state.set_state(AdminState.desc)
-
-@dp.message(AdminState.desc)
-async def admin_p_desc(m: types.Message, state: FSMContext):
-    await state.update_data(desc=m.text)
-    await m.answer("Омбордаги сони (рақам):")
-    await state.set_state(AdminState.stock)
-
-@dp.message(AdminState.stock)
 async def admin_p_save(m: types.Message, state: FSMContext):
     if not m.text.isdigit(): return await m.answer("Рақам ёзинг!")
     d = await state.get_data()
-    await add_product(d['name'], d['price'], int(m.text), d['file_id'], d['desc'], d['category'], d['delivery_size'])
+    await add_product(d['name'], d['article'], int(m.text), d['file_id'], d['category'])
     await m.answer("✅ Маҳсулот қўшилди!", reply_markup=main_kb(m.from_user.id))
     await state.clear()
 
@@ -571,7 +549,7 @@ async def back_to_categories(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("u_v_"))
 async def user_p_view(call: CallbackQuery):
     p = await get_product(call.data.split("_")[2])
-    cap = f"📱 <b>{p['name']}</b>\n💰 {p['price']} сом\n📝 {p['description']}\n📦 Омборда: {p['stock']}"
+    cap = f"📱 <b>{p['name']}</b>\n💰 {p['price']} сом\n📝 Артикул: {p.get('article', 'Йўқ')}\n📦 Омборда: {p.get('stock', 999)}"
     kb = InlineKeyboardBuilder()
     kb.button(text="🛒 Саватга қўшиш", callback_data=f"u_a_{p['_id']}")
     kb.button(text="🔙 Орқага", callback_data="u_p_0")
@@ -591,13 +569,12 @@ async def user_cart_save(m: types.Message, state: FSMContext):
     qty = int(m.text)
     d = await state.get_data()
     p = await get_product(d['pid'])
-    if qty > p['stock']: return await m.answer(f"Кечирасиз, фақат {p['stock']} та бор.")
+    if qty > p.get('stock', 999): return await m.answer(f"Кечирасиз, фақат {p.get('stock', 999)} та бор.")
     cart = d.get("cart", {})
     pid = str(p['_id'])
     
-    del_size = p.get('delivery_size', '🚕 Такси') 
     if pid in cart: cart[pid]['qty'] += qty
-    else: cart[pid] = {'name': p['name'], 'price': p['price'], 'qty': qty, 'delivery_size': del_size}
+    else: cart[pid] = {'name': p['name'], 'price': p['price'], 'qty': qty}
     
     await state.update_data(cart=cart)
     await m.answer("✅ Саватга қўшилди!", reply_markup=main_kb(m.from_user.id))
@@ -623,7 +600,7 @@ async def user_cart_clr(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text("Сават тозаланди.")
 
 # =====================================================================
-# CHECKOUT MANTIQI (3 TIL, 20% CHEGIRMA, 10% ZAKALAT, MULTI-BASE)
+# CHECKOUT MANTIQI
 # =====================================================================
 
 @dp.callback_query(F.data == "u_checkout")
@@ -715,11 +692,6 @@ async def user_location_get(m: types.Message, state: FSMContext):
     cart_total = sum(i['price'] * i['qty'] for i in cart.values())
 
     vehicle = "🚕 Такси"
-    for item in cart.values():
-        if item.get("delivery_size") == "🚛 Лабо":
-            vehicle = "🚛 Лабо/Портер"
-            break
-
     await state.update_data(vehicle_type=vehicle)
 
     if not m.location:
@@ -743,13 +715,10 @@ async def user_location_get(m: types.Message, state: FSMContext):
         return await m.answer({"uz":"❌ 50 км дан узоққа элтиб бермаймиз. Ёки сизга яқин база йўқ.","ru":"❌ Доставка только до 50 км от ближайшей базы.","kg":"❌ Эң жакын базадан 50 кмге чейин гана жеткиребиз."}[lang])
 
     base_price = 0
-    if vehicle == "🚕 Такси":
-        if distance_km > 30:
-            return await m.answer({"uz":"❌ Такси фақат 30 км гача.","ru":"❌ Такси только до 30 км.","kg":"❌ Такси 30 кмге чейин."}[lang])
-        if cart_total > 50000: base_price = max(0, distance_km - 10) * 200
-        else: base_price = distance_km * 200
-    else:
-        base_price = 500 + (distance_km * 2 * 50)
+    if distance_km > 30:
+        return await m.answer({"uz":"❌ Такси фақат 30 км гача.","ru":"❌ Такси только до 30 км.","kg":"❌ Такси 30 кмге чейин."}[lang])
+    if cart_total > 50000: base_price = max(0, distance_km - 10) * 200
+    else: base_price = distance_km * 200
 
     base_price = round(base_price, -1)
     discounted_price = round(base_price * 0.8, -1) 
