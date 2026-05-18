@@ -25,7 +25,7 @@ try:
     services_col = db['services']
     locations_col = db['locations']
     ads_col = db['ads']
-    bases_col = db['bases'] # ЯНГИ: Базалар коллекцияси
+    bases_col = db['bases'] 
     
     logger.info("MongoDB ulanishi 100% muvaffaqiyatli!")
 except Exception as e:
@@ -35,16 +35,15 @@ except Exception as e:
 # 1. MAHSULOTLAR (PRODUCTS) MANTIQI
 # =====================================================================
 
-async def add_product(name, price, stock, file_id, description, category, delivery_size):
+async def add_product(name, article, price, file_id, category):
     try:
         doc = {
             "name": name,
+            "article": str(article),
             "price": int(price),
-            "stock": int(stock),
+            "stock": 999,
             "file_id": file_id,
-            "description": description,
             "category": category,
-            "delivery_size": delivery_size, # ЯНГИ: Транспорт тури
             "created_at": time.time()
         }
         result = await products_col.insert_one(doc)
@@ -54,7 +53,6 @@ async def add_product(name, price, stock, file_id, description, category, delive
         return None
 
 async def get_categories():
-    """Barcha mavjud kategoriyalarni olish"""
     try:
         return await products_col.distinct("category", {"stock": {"$gt": 0}})
     except Exception as e:
@@ -62,7 +60,6 @@ async def get_categories():
         return []
 
 async def get_products_by_category_paginated(category, page=0, page_size=6):
-    """Kategoriya bo'yicha mahsulotlarni sahifalab chiqarish"""
     try:
         skip = page * page_size
         query = {"stock": {"$gt": 0}, "category": category}
@@ -75,7 +72,6 @@ async def get_products_by_category_paginated(category, page=0, page_size=6):
         return [], 0
 
 async def get_product(pid):
-    """ID orqali mahsulot ma'lumotlarini olish"""
     try:
         if not ObjectId.is_valid(pid): return None
         return await products_col.find_one({"_id": ObjectId(pid)})
@@ -84,7 +80,6 @@ async def get_product(pid):
         return None
 
 async def delete_product(pid):
-    """Mahsulotni o'chirish"""
     try:
         await products_col.delete_one({"_id": ObjectId(pid)})
         return True
@@ -93,7 +88,6 @@ async def delete_product(pid):
         return False
 
 async def set_product_stock(pid, new_stock):
-    """Omborni tahrirlash"""
     try:
         await products_col.update_one({"_id": ObjectId(pid)}, {"$set": {"stock": int(new_stock)}})
         return True
@@ -102,7 +96,6 @@ async def set_product_stock(pid, new_stock):
         return False
 
 async def decrease_stock(pid, qty):
-    """Sotuvdan keyin ombordagi mahsulotni kamaytirish"""
     try:
         await products_col.update_one({"_id": ObjectId(pid)}, {"$inc": {"stock": -int(qty)}})
         return True
@@ -111,7 +104,6 @@ async def decrease_stock(pid, qty):
         return False
 
 async def get_all_products():
-    """Admin uchun barcha mahsulotlar ro'yxati"""
     try:
         return await products_col.find().sort("created_at", -1).to_list(length=2000)
     except Exception as e:
@@ -123,7 +115,6 @@ async def get_all_products():
 # =====================================================================
 
 async def create_order(user_id, user_name, phone, cart, total_price, pay_method, delivery_type, location, comment):
-    """Yangi buyurtma va unikal ID"""
     try:
         order_id = str(int(time.time() * 1000))[-6:] 
         order_data = {
@@ -194,7 +185,7 @@ async def delete_service(sid):
 async def add_location(name, address, lat, lon):
     try:
         map_link = f"https://yandex.com/maps/?pt={lon},{lat}&z=16&l=map"
-        await locations_col.insert_one({"name": name, "address": address, "map_link": map_link})
+        await locations_col.insert_one({"name": name, "address": address, "lat": lat, "lon": lon, "map_link": map_link})
         return True
     except Exception as e:
         logger.error(f"add_location xatosi: {e}")
