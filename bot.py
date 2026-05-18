@@ -37,9 +37,9 @@ def get_delivery_time(lang):
     tz = pytz.timezone('Asia/Bishkek')
     now = datetime.now(tz)
     if now.hour < 13:
-        return {"uz": "бугун тушдан кейин", "ru": "сегодня после обеда", "kg": "бүгүн түштөн кийин"}.get(lang, "бугун тушдан кейин")
+        return {"uz": "бугун тушдан кейин", "ru": "сегодня после обеда", "kg": "бүгүн түштөн кийин"}.get(lang, "бүгүн түштөн кийин")
     else:
-        return {"uz": "эртага тушгача", "ru": "завтра до обеда", "kg": "эртең түшкө чейин"}.get(lang, "эртага тушгача")
+        return {"uz": "эртага тушгача", "ru": "завтра до обеда", "kg": "эртең түшкө чейин"}.get(lang, "эртең түшкө чейин")
 
 # =====================================================================
 # TEXNIK XIZMAT (MAINTENANCE) MIDDLEWARE
@@ -54,12 +54,12 @@ class MaintenanceMiddleware(BaseMiddleware):
             return await handler(event, data)
         
         msg_text = (
-            "🇺🇿 <b>Ҳурматли фойдаланувчи!</b>\n"
-            "Тизимни янада қулайроқ қилиш мақсадида ботда техник ишлар олиб борилмоқда. Тез орада қайта ишга тушамиз. Тушунганингиз учун раҳмат!\n\n"
+            "🇰🇬 <b>Урматтуу колдонуучу!</b>\n"
+            "Системаны жакшыртуу максатында ботто техникалык иштер жүрүп жатат. Жакында кайтып келебиз. Түшүнгөнүңүз үчүн рахмат!\n\n"
             "🇷🇺 <b>Уважаемый пользователь!</b>\n"
             "В настоящее время проводятся технические работы по улучшению системы. Мы скоро вернемся. Спасибо за понимание!\n\n"
-            "🇰🇬 <b>Урматтуу колдонуучу!</b>\n"
-            "Системаны жакшыртуу максатында ботто техникалык иштер жүрүп жатат. Жакында кайтып келебиз. Түшүнгөнүңүз үчүн рахмат!"
+            "🇺🇿 <b>Ҳурматли фойдаланувчи!</b>\n"
+            "Тизимни янада қулайроқ қилиш мақсадида ботда техник ишлар олиб борилмоқда. Тез орада қайта ишга тушамиз. Тушунганингиз учун раҳмат!"
         )
         
         if isinstance(event, types.Message):
@@ -120,8 +120,8 @@ def is_admin(user_id):
 
 def main_kb(user_id):
     rows = [
-        [KeyboardButton(text="🛍 Дўкон"), KeyboardButton(text="🛒 Сават")],
-        [KeyboardButton(text="ℹ️ Биз ҳақимизда")]
+        [KeyboardButton(text="🛍 Дүкөн"), KeyboardButton(text="🛒 Себет")],
+        [KeyboardButton(text="ℹ️ Биз жөнүндө")]
     ]
     if is_admin(user_id):
         rows.append([KeyboardButton(text="📦 Буюртмалар"), KeyboardButton(text="➕ Маҳсулот")])
@@ -142,10 +142,10 @@ async def start_handler(m: types.Message, state: FSMContext):
         p = await get_product(pid)
         if p:
             await state.update_data(pid=pid)
-            await m.answer(f"📦 <b>{p['name']}</b> танланди.\nНечта керак? Рақам билан ёзинг:", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+            await m.answer(f"📦 <b>{p['name']}</b> тандалды.\nКанча керек? Сан менен жазыңыз:", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
             await state.set_state(UserState.input_qty)
             return
-    await m.answer(f"Салом, {m.from_user.full_name}! SSS Online Shop ботига хуш келибсиз.", reply_markup=main_kb(m.from_user.id))
+    await m.answer(f"Салам, {m.from_user.full_name}! SSS Online Shop ботуна кош келиңиз.", reply_markup=main_kb(m.from_user.id))
 
 # =====================================================================
 # ADMIN: SAYT BOSHQARUVI VA O'CHIRISH
@@ -498,19 +498,19 @@ async def admin_ord_save_st(call: CallbackQuery):
 # FOYDALANUVCHI: DO'KON VA SAVAT
 # =====================================================================
 
-@dp.message(F.text == "ℹ️ Биз ҳақимизда")
+@dp.message(F.text.in_(["ℹ️ Биз жөнүндө", "ℹ️ Биз ҳақимизда"]))
 async def about_handler(m: types.Message):
     i = await get_shop_info()
     await m.answer(f"📍 Манзил: {i['address']}\n📞 Тел: {i['phone']}\nℹ️ {i['about']}")
 
-@dp.message(F.text == "🛍 Дўкон")
+@dp.message(F.text.in_(["🛍 Дүкөн", "🛍 Дўкон"]))
 async def user_shop(m: types.Message):
     cats = await get_categories()
-    if not cats: return await m.answer("Маҳсулот йўқ")
+    if not cats: return await m.answer("Товарлар жок / Маҳсулот йўқ")
     kb = InlineKeyboardBuilder()
     for c in cats: kb.button(text=c, callback_data=f"cat_{c[:20]}") 
     kb.adjust(2)
-    await m.answer("📁 Категорияни танланг:", reply_markup=kb.as_markup())
+    await m.answer("📁 Категорияны тандаңыз:", reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data.startswith("cat_"))
 async def user_shop_cat(call: CallbackQuery, state: FSMContext):
@@ -522,13 +522,13 @@ async def user_shop_cat(call: CallbackQuery, state: FSMContext):
 async def user_shop_pg(call: CallbackQuery, state: FSMContext):
     d = await state.get_data()
     cat = d.get("current_cat")
-    if not cat: return await call.answer("Хатолик: қайта киринг", show_alert=True)
+    if not cat: return await call.answer("Ката: кайра кириңиз", show_alert=True)
     await user_shop_page(call, cat, int(call.data.split("_")[2]))
 
 async def user_shop_page(m_or_call, cat, page):
     prods, total = await get_products_by_category_paginated(cat, page, 6)
     if not prods: 
-        return await (m_or_call.answer("Бўш") if isinstance(m_or_call, types.Message) else m_or_call.answer("Бўш", show_alert=True))
+        return await (m_or_call.answer("Бўш / Бош") if isinstance(m_or_call, types.Message) else m_or_call.answer("Бўш / Бош", show_alert=True))
     kb = InlineKeyboardBuilder()
     for p in prods: kb.button(text=f"{p['name']}", callback_data=f"u_v_{p['_id']}")
     kb.adjust(2)
@@ -537,7 +537,7 @@ async def user_shop_page(m_or_call, cat, page):
     if (page + 1) * 6 < total: nav.append(InlineKeyboardButton(text="➡️", callback_data=f"u_p_{page+1}"))
     nav.append(InlineKeyboardButton(text="🔙 Каталог", callback_data="back_to_cats"))
     if nav: kb.row(*nav)
-    text = f"📁 Категория: <b>{cat}</b>\nМаҳсулотларимиз:"
+    text = f"📁 Категория: <b>{cat}</b>\nТоварлар:"
     if isinstance(m_or_call, types.Message): await m_or_call.answer(text, reply_markup=kb.as_markup(), parse_mode="HTML")
     else: await m_or_call.message.edit_text(text, reply_markup=kb.as_markup(), parse_mode="HTML")
 
@@ -551,8 +551,8 @@ async def user_p_view(call: CallbackQuery):
     p = await get_product(call.data.split("_")[2])
     cap = f"📱 <b>{p['name']}</b>\n💰 {p['price']} сом\n📝 Артикул: {p.get('article', 'Йўқ')}\n📦 Омборда: {p.get('stock', 999)}"
     kb = InlineKeyboardBuilder()
-    kb.button(text="🛒 Саватга қўшиш", callback_data=f"u_a_{p['_id']}")
-    kb.button(text="🔙 Орқага", callback_data="u_p_0")
+    kb.button(text="🛒 Себетке кошуу", callback_data=f"u_a_{p['_id']}")
+    kb.button(text="🔙 Артка", callback_data="u_p_0")
     try: await call.message.answer_photo(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
     except: await call.message.answer_document(p['file_id'], caption=cap, parse_mode="HTML", reply_markup=kb.as_markup())
     await call.message.delete()
@@ -560,16 +560,16 @@ async def user_p_view(call: CallbackQuery):
 @dp.callback_query(F.data.startswith("u_a_"))
 async def user_cart_qty(call: CallbackQuery, state: FSMContext):
     await state.update_data(pid=call.data.split("_")[2])
-    await call.message.answer("Нечта керак? Рақам билан ёзинг:", reply_markup=ReplyKeyboardRemove())
+    await call.message.answer("Канча керек? Сан менен жазыңыз:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(UserState.input_qty)
 
 @dp.message(UserState.input_qty)
 async def user_cart_save(m: types.Message, state: FSMContext):
-    if not m.text.isdigit(): return await m.answer("Рақам киритинг!")
+    if not m.text.isdigit(): return await m.answer("Сан киргизиңиз!")
     qty = int(m.text)
     d = await state.get_data()
     p = await get_product(d['pid'])
-    if qty > p.get('stock', 999): return await m.answer(f"Кечирасиз, фақат {p.get('stock', 999)} та бор.")
+    if qty > p.get('stock', 999): return await m.answer(f"Кечиресиз, болгону {p.get('stock', 999)} даана бар.")
     cart = d.get("cart", {})
     pid = str(p['_id'])
     
@@ -577,27 +577,27 @@ async def user_cart_save(m: types.Message, state: FSMContext):
     else: cart[pid] = {'name': p['name'], 'price': p['price'], 'qty': qty}
     
     await state.update_data(cart=cart)
-    await m.answer("✅ Саватга қўшилди!", reply_markup=main_kb(m.from_user.id))
+    await m.answer("✅ Себетке кошулду!", reply_markup=main_kb(m.from_user.id))
     await state.set_state(None)
 
-@dp.message(F.text == "🛒 Сават")
+@dp.message(F.text.in_(["🛒 Себет", "🛒 Сават"]))
 async def user_cart_show(m: types.Message, state: FSMContext):
     d = await state.get_data()
     cart = d.get("cart", {})
-    if not cart: return await m.answer("Саватингиз бўш.")
-    txt = "🛒 Саватдагилар:\n"
+    if not cart: return await m.answer("Себетиңиз бош / Саватингиз бўш.")
+    txt = "🛒 Себеттегилер:\n"
     total = sum(i['price'] * i['qty'] for i in cart.values())
     for i in cart.values(): txt += f"- {i['name']} x {i['qty']} = {i['price']*i['qty']} сом\n"
-    txt += f"\n💰 Жами: {total} сом"
+    txt += f"\n💰 Жалпы: {total} сом"
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏁 Буюртма бериш", callback_data="u_checkout")
-    kb.button(text="🗑 Тозалаш", callback_data="u_clear")
+    kb.button(text="🏁 Буйрутма берүү", callback_data="u_checkout")
+    kb.button(text="🗑 Тазалоо", callback_data="u_clear")
     await m.answer(txt, reply_markup=kb.as_markup())
 
 @dp.callback_query(F.data == "u_clear")
 async def user_cart_clr(call: CallbackQuery, state: FSMContext):
     await state.update_data(cart={})
-    await call.message.edit_text("Сават тозаланди.")
+    await call.message.edit_text("Себет тазаланды.")
 
 # =====================================================================
 # CHECKOUT MANTIQI
@@ -606,10 +606,10 @@ async def user_cart_clr(call: CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "u_checkout")
 async def user_checkout_start(call: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardBuilder()
-    kb.button(text="🇺🇿 Ўзбекча", callback_data="lang_uz")
+    kb.button(text="🇰🇬 Кыргызча", callback_data="lang_kg") # Qirg'iz tili birinchiga olib chiqildi
     kb.button(text="🇷🇺 Русский", callback_data="lang_ru")
-    kb.button(text="🇰🇬 Кыргызча", callback_data="lang_kg")
-    await call.message.answer("Буюртмани расмийлаштириш учун тилни танланг:\nВыберите язык:\nТилди тандаңыз:", reply_markup=kb.as_markup())
+    kb.button(text="🇺🇿 Ўзбекча", callback_data="lang_uz")
+    await call.message.answer("Тилди тандаңыз:\nВыберите язык:\nБуюртмани расмийлаштириш учун тилни танланг:", reply_markup=kb.as_markup())
     await call.message.delete()
 
 @dp.callback_query(F.data.startswith("lang_"))
@@ -631,7 +631,7 @@ async def set_user_language(call: CallbackQuery, state: FSMContext):
 @dp.message(UserState.delivery_type)
 async def user_delivery_get(m: types.Message, state: FSMContext):
     d = await state.get_data()
-    lang = d.get('lang', 'uz')
+    lang = d.get('lang', 'kg') # ASOSIY TIL QIRG'IZ
 
     cancel_btns = ["❌ Бекор қилиш", "❌ Отмена", "❌ Жокко чыгаруу"]
     delivery_btns = ["🚚 Етказиб бериш", "🚚 Доставка", "🚚 Жеткирүү"]
@@ -639,7 +639,7 @@ async def user_delivery_get(m: types.Message, state: FSMContext):
 
     if m.text in cancel_btns:
         await state.set_state(None)
-        return await m.answer("Бекор қилинди / Отменено / Жокко чыгарылды.", reply_markup=main_kb(m.from_user.id))
+        return await m.answer("Жокко чыгарылды / Отменено / Бекор қилинди.", reply_markup=main_kb(m.from_user.id))
 
     if m.text in delivery_btns:
         await state.update_data(delivery_type="Етказиб бериш")
@@ -669,7 +669,7 @@ async def user_delivery_get(m: types.Message, state: FSMContext):
 @dp.message(UserState.upsell_loc)
 async def handle_upsell(m: types.Message, state: FSMContext):
     d = await state.get_data()
-    lang = d.get('lang', 'uz')
+    lang = d.get('lang', 'kg')
     no_btns = ["Йўқ, ўзим бораман", "Нет, приеду сам", "Жок, өзүм барам"]
 
     if m.text in no_btns:
@@ -687,7 +687,7 @@ async def handle_upsell(m: types.Message, state: FSMContext):
 @dp.message(UserState.location)
 async def user_location_get(m: types.Message, state: FSMContext):
     d = await state.get_data()
-    lang = d.get('lang', 'uz')
+    lang = d.get('lang', 'kg')
     cart = d.get("cart", {})
     cart_total = sum(i['price'] * i['qty'] for i in cart.values())
 
@@ -742,7 +742,7 @@ async def user_phone_get(m: types.Message, state: FSMContext):
     phone = m.contact.phone_number if m.contact else m.text
     await state.update_data(phone=phone)
     d = await state.get_data()
-    lang = d.get('lang', 'uz')
+    lang = d.get('lang', 'kg')
 
     cart_total = sum(i['price'] * i['qty'] for i in d.get("cart", {}).values())
     delivery_price = d.get('delivery_price', 0)
@@ -763,7 +763,7 @@ async def user_phone_get(m: types.Message, state: FSMContext):
 @dp.message(UserState.check_photo, F.photo)
 async def finish_order(m: types.Message, state: FSMContext):
     d = await state.get_data()
-    lang = d.get('lang', 'uz')
+    lang = d.get('lang', 'kg')
     
     check_file_id = m.photo[-1].file_id
     cart = d.get("cart", {})
@@ -804,7 +804,10 @@ async def finish_order(m: types.Message, state: FSMContext):
 
 @dp.message(UserState.check_photo)
 async def user_check_invalid(m: types.Message):
-    await m.answer("Илтимос, тўлов чекини фақат расм (скриншот) кўринишида юборинг!")
+    d = await state.get_data()
+    lang = d.get('lang', 'kg')
+    msg = {"uz":"Илтимос, тўлов чекини фақат расм (скриншот) кўринишида юборинг!","ru":"Пожалуйста, отправьте чек только в виде фото!","kg":"Сураныч, төлөм чегин сүрөт түрүндө гана жөнөтүңүз!"}[lang]
+    await m.answer(msg)
 
 async def main():
     await bot.delete_webhook(drop_pending_updates=True)
